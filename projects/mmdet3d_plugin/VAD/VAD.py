@@ -285,21 +285,34 @@ class VAD(MVXTwoStageDetector):
 
         三步走：
           1) 拆分时序：img 形状 (B, len_queue, N=6, C, H, W)
+                               批次，时序长度，相机数，通道 3（RGB），高，宽
                        prev_img 是历史帧，img 是当前帧
           2) 历史帧过 obtain_history_bev → prev_bev（无梯度）
           3) 当前帧过 extract_feat + forward_pts_train → 出 loss
+
+        关于 img_metas（图像元数据 = metadata，不是像素，而是标定/位姿/场景等描述信息）：
+          - 结构是两层嵌套 list：img_metas[batch][frame] = 一个 dict
+            外层沿 batch 维（共 B 个样本），内层沿时序帧（共 len_queue 帧）
+          - 相机维 N=6 不单独成层，而是折叠进 dict 字段里：
+            如 lidar2img 是长度 6 的数组（6 个相机各一套投影矩阵），
+            img_shape 同理；can_bus / scene_token 是整车级信息，6 相机共享一份
+          - 和 img 张量不是逐维一一对应：img 有 6 个维度，metas 只有 [batch][frame] 两层
         """
 
         # 步骤 1：拆出历史帧和当前帧
         len_queue = img.size(1)
         prev_img = img[:, :-1, ...]   # 前 len_queue-1 帧（历史）
         img = img[:, -1, ...]          # 最后一帧（当前）
-
+        # 深拷贝给历史分支独用：can_bus 等字段后续会被原地修改（-=），
+        # deepcopy 避免历史帧与当前帧的 metas 互相污染
+        # 相机元数据 在BEV特征编码时，需要用相机参数将3D BEV点投影到2D图像平面
         prev_img_metas = copy.deepcopy(img_metas)
         # 步骤 2：跑历史 BEV（仅当有历史帧时）
         prev_bev = self.obtain_history_bev(prev_img, prev_img_metas) if len_queue > 1 else None
 
-        # 取出当前帧的 metas
+        # 取出当前帧的 metas：列表推导沿 batch 遍历（each=一个样本的全部帧），
+        # 用 [len_queue-1] 在帧维取最后一帧（当前帧），等价于张量的 img[:, -1] 切片。
+        # 切完后 metas 与 img 在 batch 维重新对齐 → 最终得到B个当前帧的meta（每个meta对应一个样本）
         img_metas = [each[len_queue-1] for each in img_metas]
         # 步骤 3：当前帧图像 → 2D 特征
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
