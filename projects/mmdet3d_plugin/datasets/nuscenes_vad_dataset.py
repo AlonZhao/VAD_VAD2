@@ -1208,18 +1208,31 @@ class VADCustomNuScenesDataset(NuScenesDataset):
         return queue
 
     def get_ann_info(self, index):
-        """Get annotation info according to the given index.
+        """
+        【数据流第3层：获取标注信息】
+        从.pkl文件中读取标注（GT）信息，并组装成模型训练需要的格式。
+
+        关键：这里会把 agent 的多种 GT 信息拼接成一个 attr_labels 张量。
+
+        对应文档的5大类数据：
+          - gt_bboxes_3d, gt_labels_3d: 类别2（3D检测GT，人工标注）
+          - attr_labels: 类别5（他车未来轨迹，追踪算法生成）
+            包含34维：[fut_trajs(12) + fut_masks(6) + fut_goal(1) + lcf_feat(9) + fut_yaw(6)]
 
         Args:
-            index (int): Index of the annotation data to get.
+            index (int): 标注数据的索引
 
         Returns:
-            dict: Annotation information consists of the following keys:
-
-                - gt_bboxes_3d (:obj:`LiDARInstance3DBoxes`): \
-                    3D ground truth bboxes
-                - gt_labels_3d (np.ndarray): Labels of ground truths.
-                - gt_names (list[str]): Class names of ground truths.
+            dict: 标注信息字典，包含:
+                - gt_bboxes_3d (LiDARInstance3DBoxes): 3D检测框 [N_obj, 9]
+                - gt_labels_3d (np.ndarray): 类别标签 [N_obj]
+                - gt_names (np.ndarray): 类别名称 [N_obj]
+                - attr_labels (np.ndarray): 他车多维属性 [N_obj, 34]
+                    [0:12]   gt_fut_trajs:   未来6步轨迹 (Δx,Δy)×6
+                    [12:18]  gt_fut_masks:   有效性掩码
+                    [18]     gt_fut_goal:    运动方向类别(0-9)
+                    [19:28]  agent_lcf_feat: 当前状态(pos,yaw,v,size,type)
+                    [28:34]  gt_fut_yaw:     未来6步朝向变化
         """
         info = self.data_infos[index]
         # filter out bbox containing no points
@@ -1269,23 +1282,37 @@ class VADCustomNuScenesDataset(NuScenesDataset):
         return anns_results
 
     def get_data_info(self, index):
-        """Get data info according to the given index.
+        """
+        【数据流第3层：Dataset读取 - 从.pkl读取一个样本】
+        根据索引从预处理好的.pkl文件中读取一个sample的信息。
+
+        功能：将.pkl中的原始数据组装成模型输入需要的格式
+
+        对应数据流：
+          .pkl文件（预处理脚本生成）
+              ↓ 读取 info[index]
+          get_data_info()（本函数）
+              ↓ 组装为 input_dict
+          pipeline 处理（数据增强、归一化）
+              ↓
+          DataLoader 打包 batch
+              ↓
+          forward_train() 接收
 
         Args:
-            index (int): Index of the sample data to get.
+            index (int): Sample的索引
 
         Returns:
-            dict: Data information that will be passed to the data \
-                preprocessing pipelines. It includes the following keys:
-
-                - sample_idx (str): Sample index.
-                - pts_filename (str): Filename of point clouds.
-                - sweeps (list[dict]): Infos of sweeps.
-                - timestamp (float): Sample timestamp.
-                - img_filename (str, optional): Image filename.
-                - lidar2img (list[np.ndarray], optional): Transformations \
-                    from lidar to different cameras.
-                - ann_info (dict): Annotation info.
+            dict: 包含以下关键字段的字典（将传给pipeline）:
+                - sample_idx (str): Sample token
+                - img_filename (list[str]): 6个相机的图像路径
+                - lidar2img (list[np.ndarray]): lidar→image投影矩阵 [6, 4, 4]
+                - cam_intrinsic (list[np.ndarray]): 相机内参 [6, 4, 4]
+                - ego_his_trajs (np.ndarray): 自车历史轨迹 [T_h, 2]
+                - ego_fut_trajs (np.ndarray): 自车未来轨迹 [T_f, 2]
+                - ego_fut_cmd (np.ndarray): 驾驶指令 one-hot [3]
+                - ego_lcf_feat (np.ndarray): 自车低频特征 [9]
+                - ann_info (dict): 标注信息（通过get_ann_info获取）
         """
         info = self.data_infos[index]
         # standard protocal modified from SECOND.Pytorch

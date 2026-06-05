@@ -179,20 +179,41 @@ class VAD(MVXTwoStageDetector):
                           ego_fut_cmd=None,
                           ego_lcf_feat=None,
                           gt_attr_labels=None):
-        """训练时调用：跑一次 head 前向 + 计算 loss。
+        """
+        【数据流终点：计算损失函数】
+        训练时调用：跑一次 head 前向 + 计算 loss。
 
         这是【训练分支】最核心的函数，干两件事：
           1. self.pts_bbox_head(...)         → 跑出预测 outs（含 BEV、检测、地图、规划）
           2. self.pts_bbox_head.loss(...)    → 把 outs 和 GT 对比算 loss
 
-        loss 包含的几大类：
+        参数说明（与forward_train的区别）：
+          - pts_feats: 不是原始图像，而是extract_feat()提取的特征（类别1处理后）
+          - prev_bev: 历史帧的BEV特征（已通过obtain_history_bev计算）
+          - 其他参数：所有5大类数据的GT，与forward_train一致
+
+        loss 包含的几大类（对应多任务监督）：
           - det loss        : 3D 检测（cls + bbox 回归）
           - motion loss     : 他车多模态未来轨迹
           - map loss        : 向量化地图（cls + 点回归）
           - planning loss   : 自车未来轨迹（轨迹回归 + 三个约束）
-              · 与他车碰撞约束
-              · 越过车道边界约束
-              · 行驶方向约束
+              · 与他车碰撞约束（Ego-Agent Collision）
+              · 越过车道边界约束（Ego-Boundary Overstepping）
+              · 行驶方向约束（Ego-Lane Direction）
+
+        数据使用对照：
+          【输入到模型】（模型需要"看到"的信息）
+            - pts_feats: 图像特征
+            - prev_bev: 时序BEV特征
+            - ego_his_trajs: 历史轨迹（帮助理解运动状态）
+            - ego_fut_cmd: 驾驶指令（告诉模型意图）
+            - ego_lcf_feat: 当前速度/加速度等
+
+          【用于监督】（计算loss的GT）
+            - gt_bboxes_3d, gt_labels_3d: 检测监督
+            - map_gt_bboxes_3d, map_gt_labels_3d: 地图监督
+            - gt_attr_labels: 他车轨迹监督
+            - ego_fut_trajs, ego_fut_masks: 自车轨迹监督
         """
 
         # 跑 head：内部依次完成 BEV 编码 → 三个任务 head 解码
@@ -272,8 +293,60 @@ class VAD(MVXTwoStageDetector):
                       ego_lcf_feat=None,
                       gt_attr_labels=None
                       ):
-        """训练分支主流程。
+        """
+        【数据流第5层：模型训练入口 - 接收所有5大类数据】
+        训练分支主流程，这是数据流的终点，所有预处理的GT在这里汇聚。
 
+        完整数据流路径回顾：
+          nuScenes原始 → 预处理脚本 → .pkl → Dataset → DataLoader → 本函数
+
+        ============================================================
+        参数对应文档的5大类数据：
+        ============================================================
+
+        【类别1：图像】（进入模型后先提取特征）
+            img: [B, T, 6, C, H, W] 多帧多视角图像
+                 B=batch_size, T=时序帧数, 6=相机数, C=3(RGB)
+
+        【类别2：3D检测GT - 人工标注，标注成本高】
+            gt_bboxes_3d: [B, N_obj, 9] 3D检测框
+                          9维: [x,y,z, w,l,h, yaw, vx,vy]
+            gt_labels_3d: [B, N_obj] 类别标签
+            gt_bboxes_ignore: [B, N_ignore, 9] 忽略的框（难例）
+
+        【类别3：地图GT - HD Map采样转换，算法自动生成】
+            map_gt_bboxes_3d: [B, N_map, 20, 2] 矢量化地图
+                              每个元素=20个有序点的polyline
+            map_gt_labels_3d: [B, N_map] 地图类别
+                              0:lane_divider, 1:road_boundary, 2:ped_crossing
+            map_gt_bboxes_ignore: [B, N_ignore, 20, 2] 忽略的地图元素
+
+        【类别4：自车数据 - 免费午餐⭐，完全不需要标注】
+            ego_his_trajs: [B, T_h, 2] 历史轨迹（过去2秒，T_h=4）
+                          从ego pose日志往前切片得到
+            ego_fut_trajs: [B, T_f, 2] 未来轨迹GT（未来3秒，T_f=6）
+                          从ego pose日志往后切片得到（训练时"未来"已发生）
+            ego_fut_masks: [B, T_f] 有效性掩码（场景结束时为0）
+            ego_fut_cmd: [B, 3] 驾驶指令 one-hot [右转, 左转, 直行]
+                         注意：这是从未来轨迹推断的，部署时需真实导航！
+            ego_lcf_feat: [B, 9] 低频特征
+                          [vx,vy, ax,ay, w, length,width, v0, Kappa]
+
+        【类别5：他车运动GT - 追踪算法生成】
+            gt_attr_labels: [B, N_obj, 34] 他车多维属性
+                            [0:12]   gt_fut_trajs: 未来6步轨迹
+                            [12:18]  gt_fut_masks: 有效性掩码
+                            [18]     gt_fut_goal: 运动方向类别
+                            [19:28]  agent_lcf_feat: 当前状态
+                            [28:34]  gt_fut_yaw: 未来6步朝向
+
+        【类别6：元数据】
+            img_metas: list[list[dict]] 图像元信息
+                       结构：img_metas[batch_idx][frame_idx] = dict
+                       包含：相机参数、ego位姿、场景token等
+            points: None（VAD是纯视觉，不用点云）
+
+        ============================================================
         关键 GT 输入（端到端的"多任务监督"）：
           - gt_bboxes_3d / gt_labels_3d         : 3D 检测 GT
           - map_gt_bboxes_3d / map_gt_labels_3d : 向量化地图 GT（车道线、边界、人行道）
@@ -318,6 +391,7 @@ class VAD(MVXTwoStageDetector):
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
         losses = dict()
         # head 前向 + loss
+        # 模型实际输入不再是img，而是 extract_feat 输出的 img_feats（已经过 backbone + neck 处理的多尺度特征）
         losses_pts = self.forward_pts_train(img_feats, gt_bboxes_3d, gt_labels_3d,
                                             map_gt_bboxes_3d, map_gt_labels_3d, img_metas,
                                             gt_bboxes_ignore, map_gt_bboxes_ignore, prev_bev,

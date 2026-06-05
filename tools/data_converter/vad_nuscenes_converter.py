@@ -200,19 +200,32 @@ def _fill_trainval_infos(nusc,
                          max_sweeps=10,
                          fut_ts=6,
                          his_ts=2):
-    """Generate the train/val infos from the raw data.
+    """
+    【数据流第1层：预处理脚本 - 最源头】
+    生成训练/验证集的信息字典，这是 VAD 训练数据的起点。
+
+    功能：从 nuScenes 原始数据生成 .pkl 文件，包含所有训练所需的 GT。
+
+    核心工作（对应文档的5大类数据）：
+      1. 读取6相机图像路径、标定参数（类别1：图像特征的源头）
+      2. 读取3D检测框标注（类别2：人工标注）
+      3. 读取HD Map并矢量化（类别3：地图GT）
+      4. 计算ego历史/未来轨迹、指令、低频特征（类别4：免费午餐⭐）
+      5. 追踪并生成agent未来轨迹（类别5：追踪算法）
 
     Args:
-        nusc (:obj:`NuScenes`): Dataset class in the nuScenes dataset.
-        train_scenes (list[str]): Basic information of training scenes.
-        val_scenes (list[str]): Basic information of validation scenes.
-        test (bool): Whether use the test mode. In the test mode, no
-            annotations can be accessed. Default: False.
-        max_sweeps (int): Max number of sweeps. Default: 10.
+        nusc (:obj:`NuScenes`): nuScenes 数据集对象
+        nusc_can_bus: CAN 总线数据（用于ego_lcf_feat）
+        train_scenes (list[str]): 训练场景列表
+        val_scenes (list[str]): 验证场景列表
+        test (bool): 是否测试模式（无标注）
+        max_sweeps (int): 最大sweep数量（LiDAR）
+        fut_ts (int): 未来时间步数（默认6，即3秒@2Hz）
+        his_ts (int): 历史时间步数（默认2，即1秒@2Hz，实际用4帧=2秒）
 
     Returns:
-        tuple[list[dict]]: Information of training set and validation set
-            that will be saved to the info file.
+        tuple[list[dict]]: 训练集和验证集的信息列表
+            每个 dict 包含一个 sample 的完整信息（对应一个训练样本）
     """
     train_nusc_infos = []
     val_nusc_infos = []
@@ -315,132 +328,182 @@ def _fill_trainval_infos(nusc,
         info['sweeps'] = sweeps
         # obtain annotation
         if not test:
+            # ============================================================
+            # 【类别2：3D检测GT - 人工标注，高成本】
+            # 从 nuScenes 的人工标注读取 3D 检测框
+            # ============================================================
+            # 获取当前帧的所有标注（annotations）
             annotations = [
                 nusc.get('sample_annotation', token)
                 for token in sample['anns']
             ]
-            locs = np.array([b.center for b in boxes]).reshape(-1, 3)
-            dims = np.array([b.wlh for b in boxes]).reshape(-1, 3)
+            # 提取3D框的中心、尺寸、朝向
+            locs = np.array([b.center for b in boxes]).reshape(-1, 3)  # 中心 (x,y,z)
+            dims = np.array([b.wlh for b in boxes]).reshape(-1, 3)      # 尺寸 (w,l,h)
             rots = np.array([b.orientation.yaw_pitch_roll[0]
-                             for b in boxes]).reshape(-1, 1)
+                             for b in boxes]).reshape(-1, 1)            # 朝向 yaw
             velocity = np.array(
-                [nusc.box_velocity(token)[:2] for token in sample['anns']])
+                [nusc.box_velocity(token)[:2] for token in sample['anns']])  # 速度 (vx,vy)
             valid_flag = np.array(
                 [(anno['num_lidar_pts'] + anno['num_radar_pts']) > 0
                  for anno in annotations],
-                dtype=bool).reshape(-1)
-            # convert velo from global to lidar
+                dtype=bool).reshape(-1)  # 过滤点云数为0的框（遮挡严重）
+
+            # 将速度从 global 坐标系转换到 lidar 坐标系
             for i in range(len(boxes)):
                 velo = np.array([*velocity[i], 0.0])
                 velo = velo @ np.linalg.inv(e2g_r_mat).T @ np.linalg.inv(
                     l2e_r_mat).T
                 velocity[i] = velo[:2]
 
+            # 类别名称映射（nuScenes → VAD）
             names = [b.name for b in boxes]
             for i in range(len(names)):
                 if names[i] in NuScenesDataset.NameMapping:
                     names[i] = NuScenesDataset.NameMapping[names[i]]
             names = np.array(names)
-            # we need to convert rot to SECOND format.
+            # 转换为 SECOND 格式：[x,y,z, w,l,h, yaw]
             gt_boxes = np.concatenate([locs, dims, -rots - np.pi / 2], axis=1)
             assert len(gt_boxes) == len(
                 annotations), f'{len(gt_boxes)}, {len(annotations)}'
-            
+
+            # ============================================================
+            # 【类别5：他车未来轨迹GT - 追踪算法生成】
+            # 通过追踪每个 agent 的 instance_token，查询未来帧的位置
+            # ============================================================
             # get future coords for each box
             # [num_box, fut_ts*2]
             num_box = len(boxes)
-            gt_fut_trajs = np.zeros((num_box, fut_ts, 2))
-            gt_fut_yaw = np.zeros((num_box, fut_ts))
-            gt_fut_masks = np.zeros((num_box, fut_ts))
-            gt_boxes_yaw = -(gt_boxes[:,6] + np.pi / 2)
+            gt_fut_trajs = np.zeros((num_box, fut_ts, 2))   # 未来6步轨迹 [N_obj, 6, 2]
+            gt_fut_yaw = np.zeros((num_box, fut_ts))        # 未来6步朝向 [N_obj, 6]
+            gt_fut_masks = np.zeros((num_box, fut_ts))      # 有效性掩码 [N_obj, 6]
+            gt_boxes_yaw = -(gt_boxes[:,6] + np.pi / 2)     # 当前朝向角
             # agent lcf feat (x, y, yaw, vx, vy, width, length, height, type)
-            agent_lcf_feat = np.zeros((num_box, 9))
-            gt_fut_goal = np.zeros((num_box))
+            agent_lcf_feat = np.zeros((num_box, 9))         # agent 低频特征 [N_obj, 9]
+            gt_fut_goal = np.zeros((num_box))               # 终点方向分类 [N_obj]
+
+            # 对每个 agent 进行追踪和未来轨迹提取
             for i, anno in enumerate(annotations):
                 cur_box = boxes[i]
                 cur_anno = anno
-                agent_lcf_feat[i, 0:2] = cur_box.center[:2]	
-                agent_lcf_feat[i, 2] = gt_boxes_yaw[i]
-                agent_lcf_feat[i, 3:5] = velocity[i]
-                agent_lcf_feat[i, 5:8] = anno['size'] # width,length,height
-                agent_lcf_feat[i, 8] = cat2idx[anno['category_name']] if anno['category_name'] in cat2idx.keys() else -1
+                # 记录 agent 当前状态到 lcf_feat
+                agent_lcf_feat[i, 0:2] = cur_box.center[:2]	  # 当前位置 (x,y)
+                agent_lcf_feat[i, 2] = gt_boxes_yaw[i]        # 当前朝向 yaw
+                agent_lcf_feat[i, 3:5] = velocity[i]          # 当前速度 (vx,vy)
+                agent_lcf_feat[i, 5:8] = anno['size']         # 尺寸 (w,l,h)
+                agent_lcf_feat[i, 8] = cat2idx[anno['category_name']] if anno['category_name'] in cat2idx.keys() else -1  # 类别
+
+                # 往后追踪 fut_ts=6 步（未来3秒）
                 for j in range(fut_ts):
-                    if cur_anno['next'] != '':
+                    if cur_anno['next'] != '':  # 还有下一帧
+                        # 通过 instance_token 关联同一物体在下一帧的标注
                         anno_next = nusc.get('sample_annotation', cur_anno['next'])
                         box_next = Box(
                             anno_next['translation'], anno_next['size'], Quaternion(anno_next['rotation'])
                         )
-                        # Move box to ego vehicle coord system.
+                        # 坐标变换：global → ego vehicle → lidar（与当前帧对齐）
                         box_next.translate(-np.array(pose_record['translation']))
                         box_next.rotate(Quaternion(pose_record['rotation']).inverse)
-                        #  Move box to sensor coord system.
                         box_next.translate(-np.array(cs_record['translation']))
                         box_next.rotate(Quaternion(cs_record['rotation']).inverse)
+
+                        # 记录相对位移（offset格式，而非累积位置）
                         gt_fut_trajs[i, j] = box_next.center[:2] - cur_box.center[:2]
-                        gt_fut_masks[i, j] = 1
-                        # add yaw diff
+                        gt_fut_masks[i, j] = 1  # 标记此步有效
+
+                        # 记录朝向变化
                         _, _, box_yaw = quart_to_rpy([cur_box.orientation.x, cur_box.orientation.y,
                                                       cur_box.orientation.z, cur_box.orientation.w])
                         _, _, box_yaw_next = quart_to_rpy([box_next.orientation.x, box_next.orientation.y,
                                                            box_next.orientation.z, box_next.orientation.w])
                         gt_fut_yaw[i, j] = box_yaw_next - box_yaw
+
+                        # 移动到下一帧继续追踪
                         cur_anno = anno_next
                         cur_box = box_next
-                    else:
+                    else:  # 场景结束，剩余时间步填0
                         gt_fut_trajs[i, j:] = 0
                         break
-                # get agent goal
-                gt_fut_coords = np.cumsum(gt_fut_trajs[i], axis=-2)
-                coord_diff = gt_fut_coords[-1] - gt_fut_coords[0]
-                if coord_diff.max() < 1.0: # static
-                    gt_fut_goal[i] = 9
-                else:
-                    box_mot_yaw = np.arctan2(coord_diff[1], coord_diff[0]) + np.pi
-                    gt_fut_goal[i] = box_mot_yaw // (np.pi / 4)  # 0-8: goal direction class
 
+                # 计算终点目标（用于多模态预测的 goal-oriented）
+                gt_fut_coords = np.cumsum(gt_fut_trajs[i], axis=-2)  # offset → 累积坐标
+                coord_diff = gt_fut_coords[-1] - gt_fut_coords[0]   # 起点到终点的向量
+                if coord_diff.max() < 1.0:  # 几乎不动，判定为静止
+                    gt_fut_goal[i] = 9      # 静止类别
+                else:
+                    # 计算运动方向并量化为8个方向（0°-360°分8份）
+                    box_mot_yaw = np.arctan2(coord_diff[1], coord_diff[0]) + np.pi
+                    gt_fut_goal[i] = box_mot_yaw // (np.pi / 4)  # 0-7: 8个方向
+
+            # ============================================================
+            # 【类别4：自车历史轨迹 - 免费午餐⭐，从ego pose日志直接计算】
+            # 往前查询 his_ts+1=3 帧（实际代码中会用4帧），得到过去的轨迹
+            # 关键：这是"事后回看"，不需要任何标注！
+            # ============================================================
             # get ego history traj (offset format)
-            ego_his_trajs = np.zeros((his_ts+1, 3))
-            ego_his_trajs_diff = np.zeros((his_ts+1, 3))
+            ego_his_trajs = np.zeros((his_ts+1, 3))        # [3, 3] 历史位置
+            ego_his_trajs_diff = np.zeros((his_ts+1, 3))  # [3, 3] 用于插值
             sample_cur = sample
-            for i in range(his_ts, -1, -1):
+
+            # 从当前帧往前追溯
+            for i in range(his_ts, -1, -1):  # i = 2, 1, 0（倒序填充）
                 if sample_cur is not None:
+                    # 读取该帧的 ego pose（global 坐标系）
                     pose_mat = get_global_sensor_pose(sample_cur, nusc, inverse=False)
-                    ego_his_trajs[i] = pose_mat[:3, 3]
+                    ego_his_trajs[i] = pose_mat[:3, 3]  # 提取平移向量 (x,y,z)
+
                     has_prev = sample_cur['prev'] != ''
                     has_next = sample_cur['next'] != ''
+                    # 计算与下一帧的位移（用于插值缺失帧）
                     if has_next:
                         sample_next = nusc.get('sample', sample_cur['next'])
                         pose_mat_next = get_global_sensor_pose(sample_next, nusc, inverse=False)
                         ego_his_trajs_diff[i] = pose_mat_next[:3, 3] - ego_his_trajs[i]
+
+                    # 移动到上一帧
                     sample_cur = nusc.get('sample', sample_cur['prev']) if has_prev else None
                 else:
+                    # 如果已经到场景开头，用线性插值填充
                     ego_his_trajs[i] = ego_his_trajs[i+1] - ego_his_trajs_diff[i+1]
                     ego_his_trajs_diff[i] = ego_his_trajs_diff[i+1]
-            
-            # global to ego at lcf
+
+            # 坐标变换：global → ego vehicle at current frame
             ego_his_trajs = ego_his_trajs - np.array(pose_record['translation'])
             rot_mat = Quaternion(pose_record['rotation']).inverse.rotation_matrix
             ego_his_trajs = np.dot(rot_mat, ego_his_trajs.T).T
-            # ego to lidar at lcf
+
+            # 坐标变换：ego → lidar（nuScenes的lidar是ego的一个传感器）
             ego_his_trajs = ego_his_trajs - np.array(cs_record['translation'])
             rot_mat = Quaternion(cs_record['rotation']).inverse.rotation_matrix
             ego_his_trajs = np.dot(rot_mat, ego_his_trajs.T).T
-            ego_his_trajs = ego_his_trajs[1:] - ego_his_trajs[:-1]
 
+            # 转换为 offset 格式（每步相对于上一步的位移，而非累积坐标）
+            ego_his_trajs = ego_his_trajs[1:] - ego_his_trajs[:-1]  # [2, 3] → 实际是2步历史
+
+            # ============================================================
+            # 【类别4：自车未来轨迹 - 免费午餐⭐，训练时"未来"已经发生了】
+            # 往后查询 fut_ts+1=7 帧，得到未来3秒的轨迹
+            # 这是数据闭环的核心优势：部署时实时采集，事后就能生成训练GT
+            # ============================================================
             # get ego futute traj (offset format)
-            ego_fut_trajs = np.zeros((fut_ts+1, 3))
-            ego_fut_masks = np.zeros((fut_ts+1))
+            ego_fut_trajs = np.zeros((fut_ts+1, 3))   # [7, 3] 未来位置
+            ego_fut_masks = np.zeros((fut_ts+1))      # [7] 有效性掩码
             sample_cur = sample
-            for i in range(fut_ts+1):
+
+            # 从当前帧往后查询
+            for i in range(fut_ts+1):  # i = 0, 1, ..., 6
                 pose_mat = get_global_sensor_pose(sample_cur, nusc, inverse=False)
                 ego_fut_trajs[i] = pose_mat[:3, 3]
-                ego_fut_masks[i] = 1
-                if sample_cur['next'] == '':
+                ego_fut_masks[i] = 1  # 标记有效
+
+                if sample_cur['next'] == '':  # 场景结束
+                    # 剩余时间步用最后位置填充
                     ego_fut_trajs[i+1:] = ego_fut_trajs[i]
                     break
                 else:
                     sample_cur = nusc.get('sample', sample_cur['next'])
-            # global to ego at lcf
+
+            # 坐标变换：global → ego at lcf
             ego_fut_trajs = ego_fut_trajs - np.array(pose_record['translation'])
             rot_mat = Quaternion(pose_record['rotation']).inverse.rotation_matrix
             ego_fut_trajs = np.dot(rot_mat, ego_fut_trajs.T).T
@@ -448,69 +511,99 @@ def _fill_trainval_infos(nusc,
             ego_fut_trajs = ego_fut_trajs - np.array(cs_record['translation'])
             rot_mat = Quaternion(cs_record['rotation']).inverse.rotation_matrix
             ego_fut_trajs = np.dot(rot_mat, ego_fut_trajs.T).T
-            # drive command according to final fut step offset from lcf
-            if ego_fut_trajs[-1][0] >= 2:
-                command = np.array([1, 0, 0])  # Turn Right
-            elif ego_fut_trajs[-1][0] <= -2:
-                command = np.array([0, 1, 0])  # Turn Left
-            else:
-                command = np.array([0, 0, 1])  # Go Straight
-            # offset from lcf -> per-step offset
-            ego_fut_trajs = ego_fut_trajs[1:] - ego_fut_trajs[:-1]
 
+            # ============================================================
+            # 【类别4：ego_fut_cmd - 驾驶指令，从未来轨迹推断⭐】
+            # 注意：这不是真实的导航指令，而是根据未来3秒的横向位移推断的
+            # 部署时需要用真实导航系统提供的指令替换！
+            # ============================================================
+            # drive command according to final fut step offset from lcf
+            if ego_fut_trajs[-1][0] >= 2:       # 横向（x）向右偏移 >= 2m
+                command = np.array([1, 0, 0])  # Turn Right（右转）
+            elif ego_fut_trajs[-1][0] <= -2:   # 横向（x）向左偏移 >= 2m
+                command = np.array([0, 1, 0])  # Turn Left（左转）
+            else:                               # 横向偏移 < 2m
+                command = np.array([0, 0, 1])  # Go Straight（直行）
+
+            # 转换为 offset 格式（每步相对于上一步的位移）
+            ego_fut_trajs = ego_fut_trajs[1:] - ego_fut_trajs[:-1]  # [6, 3] → 6步未来
+
+            # ============================================================
+            # 【类别4：ego_lcf_feat - 自车低频控制特征，9维向量】
+            # 来源：CAN总线数据 + ego pose 微分计算
+            # 9维：[vx, vy, ax, ay, w, length, width, v0, Kappa]
+            # ============================================================
             ### ego lcf feat (vx, vy, ax, ay, w, length, width, vel, steer), w: yaw角速度
             ego_lcf_feat = np.zeros(9)
+
+            # 【计算ego速度和角速度 - 从pose微分】
             # 根据odom推算自车速度及加速度
             _, _, ego_yaw = quart_to_rpy(pose_record['rotation'])
             ego_pos = np.array(pose_record['translation'])
+
+            # 获取前后帧的pose（用于微分计算速度）
             if pose_record_prev is not None:
                 _, _, ego_yaw_prev = quart_to_rpy(pose_record_prev['rotation'])
                 ego_pos_prev = np.array(pose_record_prev['translation'])
             if pose_record_next is not None:
                 _, _, ego_yaw_next = quart_to_rpy(pose_record_next['rotation'])
                 ego_pos_next = np.array(pose_record_next['translation'])
+
             assert (pose_record_prev is not None) or (pose_record_next is not None), 'prev token and next token all empty'
+
             if pose_record_prev is not None:
-                ego_w = (ego_yaw - ego_yaw_prev) / 0.5
-                ego_v = np.linalg.norm(ego_pos[:2] - ego_pos_prev[:2]) / 0.5
+                # 用前向差分计算
+                ego_w = (ego_yaw - ego_yaw_prev) / 0.5  # 角速度 (rad/s), nuScenes 2Hz = 0.5s间隔
+                ego_v = np.linalg.norm(ego_pos[:2] - ego_pos_prev[:2]) / 0.5  # 速度标量 (m/s)
+                # 分解为横向和纵向速度（考虑yaw角）
                 ego_vx, ego_vy = ego_v * math.cos(ego_yaw + np.pi/2), ego_v * math.sin(ego_yaw + np.pi/2)
             else:
+                # 用后向差分计算
                 ego_w = (ego_yaw_next - ego_yaw) / 0.5
                 ego_v = np.linalg.norm(ego_pos_next[:2] - ego_pos[:2]) / 0.5
                 ego_vx, ego_vy = ego_v * math.cos(ego_yaw + np.pi/2), ego_v * math.sin(ego_yaw + np.pi/2)
 
+            # 【从CAN总线读取精确的速度和转向数据】
             ref_scene = nusc.get("scene", sample['scene_token'])
             try:
+                # 查询CAN总线消息（pose和转向角）
                 pose_msgs = nusc_can_bus.get_messages(ref_scene['name'],'pose')
                 steer_msgs = nusc_can_bus.get_messages(ref_scene['name'], 'steeranglefeedback')
                 pose_uts = [msg['utime'] for msg in pose_msgs]
                 steer_uts = [msg['utime'] for msg in steer_msgs]
                 ref_utime = sample['timestamp']
+
+                # 找到最近时刻的CAN消息
                 pose_index = locate_message(pose_uts, ref_utime)
                 pose_data = pose_msgs[pose_index]
                 steer_index = locate_message(steer_uts, ref_utime)
                 steer_data = steer_msgs[steer_index]
-                # initial speed
-                v0 = pose_data["vel"][0]  # [0] means longitudinal velocity  m/s
-                # curvature (positive: turn left)
+
+                # initial speed（纵向速度，m/s）
+                v0 = pose_data["vel"][0]  # [0] means longitudinal velocity
+
+                # curvature (positive: turn left)（转向曲率）
                 steering = steer_data["value"]
                 # flip x axis if in left-hand traffic (singapore)
                 flip_flag = True if map_location.startswith('singapore') else False
                 if flip_flag:
                     steering *= -1
-                Kappa = 2 * steering / 2.588
+                # 阿克曼转向公式：Kappa = 2*steering_angle / wheelbase
+                Kappa = 2 * steering / 2.588  # 2.588是车辆轴距
             except:
+                # CAN数据缺失时，用轨迹估算
                 delta_x = ego_his_trajs[-1, 0] + ego_fut_trajs[0, 0]
                 delta_y = ego_his_trajs[-1, 1] + ego_fut_trajs[0, 1]
-                v0 = np.sqrt(delta_x**2 + delta_y**2)
-                Kappa = 0
+                v0 = np.sqrt(delta_x**2 + delta_y**2)  # 估算速度
+                Kappa = 0  # 曲率设为0
 
-            ego_lcf_feat[:2] = np.array([ego_vx, ego_vy]) #can_bus[13:15]
-            ego_lcf_feat[2:4] = can_bus[7:9]
-            ego_lcf_feat[4] = ego_w #can_bus[12]
-            ego_lcf_feat[5:7] = np.array([ego_length, ego_width])
-            ego_lcf_feat[7] = v0
-            ego_lcf_feat[8] = Kappa
+            # 【组装9维特征向量】
+            ego_lcf_feat[:2] = np.array([ego_vx, ego_vy])  # [0:2] 速度 (vx, vy)
+            ego_lcf_feat[2:4] = can_bus[7:9]               # [2:4] 加速度 (ax, ay) 从can_bus直接读
+            ego_lcf_feat[4] = ego_w                        # [4] 角速度 w
+            ego_lcf_feat[5:7] = np.array([ego_length, ego_width])  # [5:7] 车辆尺寸 (长, 宽)
+            ego_lcf_feat[7] = v0                           # [7] 纵向速度（CAN）
+            ego_lcf_feat[8] = Kappa                        # [8] 转向曲率
 
             info['gt_boxes'] = gt_boxes
             info['gt_names'] = names
