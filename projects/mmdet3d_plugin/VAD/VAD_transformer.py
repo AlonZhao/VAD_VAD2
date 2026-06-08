@@ -321,46 +321,48 @@ class VADPerceptionTransformer(BaseModule):
                 reg_branches=None,
                 cls_branches=None,
                 map_reg_branches=None,
-                map_cls_branches=None,                
-                prev_bev=None,            
+                map_cls_branches=None,
+                prev_bev=None,
                 **kwargs):
-        """Forward function for `Detr3DTransformer`.
+        """
+        VADPerceptionTransformer 前向：串联 3 个 Transformer。
+
+        核心流程（3 个 Transformer 串联）：
+          ① BEV Encoder:    6相机图像特征 → BEV特征图
+          ② Detection Decoder: BEV特征 + 检测query → 检测特征
+          ③ Map Decoder:    BEV特征 + 地图query → 地图特征
+          其中 ②③ 并行（都以 ① 的 bev_embed 为 value）
+
         Args:
-            mlvl_feats (list(Tensor)): Input queries from
-                different level. Each element has shape
-                [bs, num_cams, embed_dims, h, w].
-            bev_queries (Tensor): (bev_h*bev_w, c)
-            bev_pos (Tensor): (bs, embed_dims, bev_h, bev_w)
-            object_query_embed (Tensor): The query embedding for decoder,
-                with shape [num_query, c].
-            reg_branches (obj:`nn.ModuleList`): Regression heads for
-                feature maps from each decoder layer. Only would
-                be passed when `with_box_refine` is True. Default to None.
+            mlvl_feats (list[Tensor]): FPN多尺度图像特征
+                每个元素 (bs, num_cams=6, embed_dims=256, h, w)
+            bev_queries (Tensor): BEV网格query (bev_h*bev_w=10000, 256)
+            object_query_embed (Tensor): 检测query (300, 512)
+                512 = 256(位置pos) + 256(内容content)
+            map_query_embed (Tensor): 地图query (2000, 512)
+                2000 = 100条线 × 20点
+            bev_h, bev_w (int): BEV网格尺寸，VAD_tiny为100×100
+            prev_bev (Tensor): 上一帧BEV特征 (bs, 10000, 256)，时序融合用
+            reg_branches/cls_branches: 检测的回归/分类分支（迭代refine用）
+            map_reg_branches/map_cls_branches: 地图的回归/分类分支
+
         Returns:
-            tuple[Tensor]: results of decoder containing the following tensor.
-                - bev_embed: BEV features
-                - inter_states: Outputs from decoder. If
-                    return_intermediate_dec is True output has shape \
-                      (num_dec_layers, bs, num_query, embed_dims), else has \
-                      shape (1, bs, num_query, embed_dims).
-                - init_reference_out: The initial value of reference \
-                    points, has shape (bs, num_queries, 4).
-                - inter_references_out: The internal value of reference \
-                    points in decoder, has shape \
-                    (num_dec_layers, bs,num_query, embed_dims)
-                - enc_outputs_class: The classification score of \
-                    proposals generated from \
-                    encoder's feature maps, has shape \
-                    (batch, h*w, num_classes). \
-                    Only would be returned when `as_two_stage` is True, \
-                    otherwise None.
-                - enc_outputs_coord_unact: The regression results \
-                    generated from encoder's feature maps., has shape \
-                    (batch, h*w, 4). Only would \
-                    be returned when `as_two_stage` is True, \
-                    otherwise None.
+            tuple (7个元素):
+                - bev_embed: BEV特征图 (bs, 10000, 256)
+                - inter_states: 检测decoder输出 (num_layers, bs, 300, 256)
+                - init_reference_out: 检测初始参考点 (bs, 300, 3)
+                - inter_references_out: 检测各层参考点 (num_layers, bs, 300, 3)
+                - map_inter_states: 地图decoder输出 (num_layers, bs, 2000, 256)
+                - map_init_reference_out: 地图初始参考点 (bs, 2000, 2)
+                - map_inter_references_out: 地图各层参考点
         """
 
+        # ====================================================================
+        # 【① BEV Encoder】6相机透视图特征 → 统一BEV俯视图特征
+        # ====================================================================
+        # 内部包含 Spatial Cross-Attention（采样6相机特征）
+        #         + Temporal Self-Attention（融合prev_bev时序）
+        # 这是唯一"前置"的Transformer：②③都依赖它的输出
         bev_embed = self.get_bev_features(
             mlvl_feats,
             bev_queries,
@@ -369,40 +371,64 @@ class VADPerceptionTransformer(BaseModule):
             grid_length=grid_length,
             bev_pos=bev_pos,
             prev_bev=prev_bev,
-            **kwargs)  # bev_embed shape: bs, bev_h*bev_w, embed_dims
+            **kwargs)  # bev_embed: (bs, bev_h*bev_w=10000, embed_dims=256)
 
         bs = mlvl_feats[0].size(0)
+
+        # ====================================================================
+        # 【准备检测query】拆分 512 维 → 位置 + 内容
+        # ====================================================================
+        # object_query_embed (300, 512) 沿dim=1拆成两个256维：
+        #   query_pos: 位置部分（"我倾向于在哪里找物体"）
+        #   query:     内容部分（"我在找什么类型的物体"）
         query_pos, query = torch.split(
-            object_query_embed, self.embed_dims, dim=1)
-        query_pos = query_pos.unsqueeze(0).expand(bs, -1, -1)
-        query = query.unsqueeze(0).expand(bs, -1, -1)
-        reference_points = self.reference_points(query_pos)
+            object_query_embed, self.embed_dims, dim=1)  # 各 (300, 256)
+        query_pos = query_pos.unsqueeze(0).expand(bs, -1, -1)  # (bs, 300, 256)
+        query = query.unsqueeze(0).expand(bs, -1, -1)          # (bs, 300, 256)
+        # 由位置query生成3D参考点(x,y,z)，作为decoder的初始"锚点"
+        # sigmoid归一化到[0,1]，后续映射到point_cloud_range实际坐标
+        reference_points = self.reference_points(query_pos)  # (bs, 300, 3)
         reference_points = reference_points.sigmoid()
-        init_reference_out = reference_points
+        init_reference_out = reference_points  # 保存初始参考点（深监督用）
 
+        # ====================================================================
+        # 【准备地图query】同样拆分 512 维 → 位置 + 内容
+        # ====================================================================
         map_query_pos, map_query = torch.split(
-            map_query_embed, self.embed_dims, dim=1)
-        map_query_pos = map_query_pos.unsqueeze(0).expand(bs, -1, -1)
-        map_query = map_query.unsqueeze(0).expand(bs, -1, -1)
-        map_reference_points = self.map_reference_points(map_query_pos)
+            map_query_embed, self.embed_dims, dim=1)  # 各 (2000, 256)
+        map_query_pos = map_query_pos.unsqueeze(0).expand(bs, -1, -1)  # (bs, 2000, 256)
+        map_query = map_query.unsqueeze(0).expand(bs, -1, -1)          # (bs, 2000, 256)
+        # 地图参考点是2D(x,y)，不需要高度z（车道线在地面上）
+        map_reference_points = self.map_reference_points(map_query_pos)  # (bs, 2000, 2)
         map_reference_points = map_reference_points.sigmoid()
-        map_init_reference_out = map_reference_points        
+        map_init_reference_out = map_reference_points
 
-        query = query.permute(1, 0, 2)
+        # ====================================================================
+        # 【维度调整】(bs, Q, D) → (Q, bs, D)
+        # ====================================================================
+        # PyTorch的Transformer/Attention默认要求 (序列长度, batch, 特征)
+        query = query.permute(1, 0, 2)              # (300, bs, 256)
         query_pos = query_pos.permute(1, 0, 2)
-        map_query = map_query.permute(1, 0, 2)
+        map_query = map_query.permute(1, 0, 2)      # (2000, bs, 256)
         map_query_pos = map_query_pos.permute(1, 0, 2)
-        bev_embed = bev_embed.permute(1, 0, 2)
+        bev_embed = bev_embed.permute(1, 0, 2)      # (10000, bs, 256)
 
+        # ====================================================================
+        # 【② Detection Decoder】检测query 在 BEV 上做 cross-attention
+        # ====================================================================
+        # query=300个检测槽位, value=bev_embed(BEV特征)
+        # 每个query在BEV特征图上"搜索"物体，逐层refine参考点位置
+        # 返回intermediate（每层输出），用于深监督
         if self.decoder is not None:
-            # [L, Q, B, D], [L, B, Q, D]
+            # inter_states: (num_layers, 300, bs, 256) 各层检测特征
+            # inter_references: (num_layers, bs, 300, 3) 各层refine后的参考点
             inter_states, inter_references = self.decoder(
-                query=query,
+                query=query,              # 检测query (300, bs, 256)
                 key=None,
-                value=bev_embed,
+                value=bev_embed,          # ← BEV特征作为value（从中提取信息）
                 query_pos=query_pos,
-                reference_points=reference_points,
-                reg_branches=reg_branches,
+                reference_points=reference_points,  # 初始锚点
+                reg_branches=reg_branches,    # 用于逐层refine参考点
                 cls_branches=cls_branches,
                 spatial_shapes=torch.tensor([[bev_h, bev_w]], device=query.device),
                 level_start_index=torch.tensor([0], device=query.device),
@@ -412,12 +438,18 @@ class VADPerceptionTransformer(BaseModule):
             inter_states = query.unsqueeze(0)
             inter_references_out = reference_points.unsqueeze(0)
 
+        # ====================================================================
+        # 【③ Map Decoder】地图query 在 BEV 上做 cross-attention（与②并行）
+        # ====================================================================
+        # 结构与Detection Decoder完全对称，只是query换成地图query
+        # query=2000个地图点槽位, value=同一个bev_embed
         if self.map_decoder is not None:
-            # [L, Q, B, D], [L, B, Q, D]
+            # map_inter_states: (num_layers, 2000, bs, 256) 各层地图特征
+            # map_inter_references: (num_layers, bs, 2000, 2) 各层refine后的点位置
             map_inter_states, map_inter_references = self.map_decoder(
-                query=map_query,
+                query=map_query,          # 地图query (2000, bs, 256)
                 key=None,
-                value=bev_embed,
+                value=bev_embed,          # ← 与检测共用同一个BEV特征
                 query_pos=map_query_pos,
                 reference_points=map_reference_points,
                 reg_branches=map_reg_branches,
@@ -430,9 +462,17 @@ class VADPerceptionTransformer(BaseModule):
             map_inter_states = map_query.unsqueeze(0)
             map_inter_references_out = map_reference_points.unsqueeze(0)
 
+        # ====================================================================
+        # 【返回7个结果】供 VADHead 后续解码成检测框/地图/轨迹
+        # ====================================================================
         return (
-            bev_embed, inter_states, init_reference_out, inter_references_out,
-            map_inter_states, map_init_reference_out, map_inter_references_out)
+            bev_embed,                  # BEV特征（时序传递 + Motion/Planning用）
+            inter_states,               # 检测decoder各层特征
+            init_reference_out,         # 检测初始参考点
+            inter_references_out,       # 检测各层参考点
+            map_inter_states,           # 地图decoder各层特征
+            map_init_reference_out,     # 地图初始参考点
+            map_inter_references_out)   # 地图各层参考点
 
 
 @TRANSFORMER_LAYER_SEQUENCE.register_module()

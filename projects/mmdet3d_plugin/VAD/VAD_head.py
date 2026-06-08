@@ -486,40 +486,63 @@ class VADHead(DETRHead):
                 ego_his_trajs=None,
                 ego_lcf_feat=None,
             ):
-        """Forward function.
-        Args:
-            mlvl_feats (tuple[Tensor]): Features from the upstream
-                network, each is a 5D-tensor with shape
-                (B, N, C, H, W).
-            prev_bev: previous bev featues
-            only_bev: only compute BEV features with encoder. 
-        Returns:
-            all_cls_scores (Tensor): Outputs from the classification head, \
-                shape [nb_dec, bs, num_query, cls_out_channels]. Note \
-                cls_out_channels should includes background.
-            all_bbox_preds (Tensor): Sigmoid outputs from the regression \
-                head with normalized coordinate format (cx, cy, w, l, cz, h, theta, vx, vy). \
-                Shape [nb_dec, bs, num_query, 9].
         """
-        
-        bs, num_cam, _, _, _ = mlvl_feats[0].shape
+        VADHead 前向传播：接收图像特征，输出检测/地图/规划等多任务预测。
+
+        Args:
+            mlvl_feats: FPN多尺度特征 list[(B, 6, 256, H, W)]
+            img_metas: 元数据 list[dict] 含can_bus/lidar2img/scene_token
+            prev_bev: 上一帧BEV (B, 10000, 256) or None
+            only_bev: True=只跑BEV Encoder, False=完整流程
+            ego_his_trajs: 自车历史 (B, 1, 2, 3) 过去1秒2步offset
+            ego_lcf_feat: 自车CAN特征 (B, 1, 9)
+
+        Returns:
+            only_bev=True: bev_embed (B, 10000, 256)
+            only_bev=False: outs (dict) 含所有任务预测
+        """
+
+        # ============================================================
+        # 【阶段1：准备基础数据】
+        # ============================================================
+        bs, num_cam, _, _, _ = mlvl_feats[0].shape  # batch_size, 6相机
         dtype = mlvl_feats[0].dtype
-        object_query_embeds = self.query_embedding.weight.to(dtype)
-        
+
+        # ============================================================
+        # 【阶段2：准备Query - DETR范式的"槽位"】
+        # ============================================================
+        # Detection Query: 300个物体槽位 (含位置+内容，故512维)
+        object_query_embeds = self.query_embedding.weight.to(dtype)  # (300, 512)
+
+        # Map Query: 地图元素槽位
+        # 两种模式：all_pts(2000个query) 或 instance_pts(100条线×20点)
         if self.map_query_embed_type == 'all_pts':
-            map_query_embeds = self.map_query_embedding.weight.to(dtype)
+            map_query_embeds = self.map_query_embedding.weight.to(dtype)  # (2000, 512)
         elif self.map_query_embed_type == 'instance_pts':
-            map_pts_embeds = self.map_pts_embedding.weight.unsqueeze(0)
-            map_instance_embeds = self.map_instance_embedding.weight.unsqueeze(1)
-            map_query_embeds = (map_pts_embeds + map_instance_embeds).flatten(0, 1).to(dtype)
+            # 组合方式：(100, 1, 512) + (1, 20, 512) → (100, 20, 512) → flatten到2000
+            map_pts_embeds = self.map_pts_embedding.weight.unsqueeze(0)      # (1, 20, 512)
+            map_instance_embeds = self.map_instance_embedding.weight.unsqueeze(1)  # (100, 1, 512)
+            map_query_embeds = (map_pts_embeds + map_instance_embeds).flatten(0, 1).to(dtype)  # (2000, 512)
 
-        bev_queries = self.bev_embedding.weight.to(dtype)
+        # BEV Query: 100×100=10000个网格点
+        bev_queries = self.bev_embedding.weight.to(dtype)  # (10000, 256)
 
+        # BEV 位置编码（正弦编码）
         bev_mask = torch.zeros((bs, self.bev_h, self.bev_w),
-                               device=bev_queries.device).to(dtype)
-        bev_pos = self.positional_encoding(bev_mask).to(dtype)
-            
-        if only_bev:  # only use encoder to obtain BEV features, TODO: refine the workaround
+                               device=bev_queries.device).to(dtype)  # (B, 100, 100)
+        bev_pos = self.positional_encoding(bev_mask).to(dtype)  # (B, 256, 100, 100)
+
+        # ============================================================
+        # 【阶段3：分支判断 - 两种执行路径】
+        # ============================================================
+        if only_bev:
+            # ────────────────────────────────────────────────────────
+            # 路径A：只跑BEV Encoder（用于历史帧处理）
+            # ────────────────────────────────────────────────────────
+            # 场景：obtain_history_bev() 中的循环调用
+            # 输入：当前帧的 mlvl_feats + 上一帧的 prev_bev
+            # 输出：当前帧的 bev_embed
+            # 作用：逐帧累积历史BEV（类似RNN的隐状态传递）
             return self.transformer.get_bev_features(
                 mlvl_feats,
                 bev_queries,
@@ -532,6 +555,13 @@ class VADHead(DETRHead):
                 prev_bev=prev_bev,
             )
         else:
+            # ────────────────────────────────────────────────────────
+            # 路径B：完整流程（训练/推理的主路径）
+            # ────────────────────────────────────────────────────────
+            # self.transformer 内部串联3个Transformer：
+            #   1. encoder (3层): 6相机特征 → BEV
+            #   2. decoder (3层): BEV + object_query → 检测特征
+            #   3. map_decoder (3层): BEV + map_query → 地图特征
             outputs = self.transformer(
                 mlvl_feats,
                 bev_queries,
@@ -542,21 +572,36 @@ class VADHead(DETRHead):
                 grid_length=(self.real_h / self.bev_h,
                              self.real_w / self.bev_w),
                 bev_pos=bev_pos,
-                reg_branches=self.reg_branches if self.with_box_refine else None,  # noqa:E501
-                cls_branches=self.cls_branches if self.as_two_stage else None,
-                map_reg_branches=self.map_reg_branches if self.with_box_refine else None,  # noqa:E501
-                map_cls_branches=self.map_cls_branches if self.as_two_stage else None,
+                reg_branches=self.reg_branches if self.with_box_refine else None,  # 检测回归分支
+                cls_branches=self.cls_branches if self.as_two_stage else None,      # 检测分类分支
+                map_reg_branches=self.map_reg_branches if self.with_box_refine else None,  # 地图回归分支
+                map_cls_branches=self.map_cls_branches if self.as_two_stage else None,      # 地图分类分支
                 img_metas=img_metas,
                 prev_bev=prev_bev
         )
 
+        # ============================================================
+        # 【阶段4：解包 transformer 输出】
+        # ============================================================
+        # outputs 包含7个元素（详见文档3.0.2）
         bev_embed, hs, init_reference, inter_references, \
             map_hs, map_init_reference, map_inter_references = outputs
+        # bev_embed: (B, 10000, 256) BEV特征图
+        # hs: (3, B, 300, 256) 检测query经3层decoder的特征（深监督）
+        # init_reference: (B, 300, 3) 检测query初始参考点(xyz)
+        # inter_references: (3, B, 300, 3) 每层decoder后的更新位置
+        # map_hs: (3, B, 2000, 256) 地图query经3层decoder的特征
+        # map_init_reference: (B, 2000, 2) 地图query初始参考点(xy)
+        # map_inter_references: (3, B, 2000, 2) 每层decoder后的更新位置
 
+        # ============================================================
+        # 【阶段5：Detection 解码 - 6层深监督】
+        # ============================================================
+        # 调整维度：(3, B, 300, 256) → (3, 300, B, 256)
         hs = hs.permute(0, 2, 1, 3)
-        outputs_classes = []
-        outputs_coords = []
-        outputs_coords_bev = []
+        outputs_classes = []      # 存储3层的分类预测
+        outputs_coords = []       # 存储3层的回归预测
+        outputs_coords_bev = []   # 存储BEV坐标（用于后续Motion/Planning）
         outputs_trajs = []
         outputs_trajs_classes = []
 
