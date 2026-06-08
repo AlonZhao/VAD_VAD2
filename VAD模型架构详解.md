@@ -1067,9 +1067,430 @@ VAD的设计在**效率**和**准确性**之间取得了较好平衡。
 
 ---
 
-## 3. VAD Head 主体
+## 3. BEV Encoder：6相机如何变成俯视图
 
-### 3.0 VADHead 结构总览
+### 3.0 核心思想：主动查询 vs 被动投影
+
+**传统方法（自下而上）**：
+```
+图像像素 → 深度估计 → 3D投影 → BEV拼接
+问题：深度不准 + 6相机拼接有缝隙
+```
+
+**VAD方法（自上而下，BEVFormer范式）**：
+```
+先在BEV上铺好10000个网格点
+每个点主动问6个相机："你们看到我这个位置了吗？"
+6个相机各自回答，BEV网格融合答案
+```
+
+> 类比：不是把6张照片"拼"成俯视图，而是**俯视图上每个格子去6张照片里"找"自己**。
+
+### 3.1 get_bev_features 函数结构
+
+**代码位置**：`VAD_transformer.py` 第212-308行
+
+**函数职责**：把 `(B, 6, 256, 12, 20)` 的6相机特征 → `(B, 10000, 256)` 的BEV特征
+
+#### **3.1.1 五个步骤流程图**
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ 输入                                                      │
+│   mlvl_feats:  [(B, 6, 256, 12, 20)]  ← FPN多尺度特征   │
+│   prev_bev:    (B, 10000, 256) or None ← 历史BEV         │
+│   bev_queries: (10000, 256)            ← BEV网格query    │
+└──────────────────────────────────────────────────────────┘
+                            ↓
+┌──────────────────────────────────────────────────────────┐
+│ 步骤1：准备 + 加入自车运动 (226-270行)                    │
+│   • bev_queries 复制给每个batch                          │
+│   • 计算 shift (平移补偿): 车移动了多少BEV格子            │
+│   • CAN总线信号编码: 18维 → 256维                        │
+│   • 加到 bev_queries: query = query + can_bus_embed      │
+└──────────────────────────────────────────────────────────┘
+                            ↓
+┌──────────────────────────────────────────────────────────┐
+│ 步骤2：旋转 prev_bev 对齐 (251-264行)                     │
+│   • 读取自车转向角: can_bus[-1]                           │
+│   • 用 torchvision.rotate() 旋转上一帧BEV                │
+│   • 目的: 上一帧是"上一帧的正前方"，要转到当前帧坐标系     │
+└──────────────────────────────────────────────────────────┘
+                            ↓
+┌──────────────────────────────────────────────────────────┐
+│ 步骤3：图像特征展平 + 加位置编码 (272-292行)               │
+│   for 每个FPN尺度:                                        │
+│     • flatten: (B,6,256,H,W) → (6,B,H*W,256)            │
+│     • 加 cams_embeds:  告诉模型"这是第几号相机"            │
+│     • 加 level_embeds: 告诉模型"这是第几级特征"            │
+│   • 4个尺度拼接: (6, B, ΣHW, 256)                        │
+└──────────────────────────────────────────────────────────┘
+                            ↓
+┌──────────────────────────────────────────────────────────┐
+│ 步骤4：BEV Encoder (294-306行) ← **核心魔法**            │
+│   self.encoder(                                           │
+│     bev_queries,    ← 10000个网格query                   │
+│     feat_flatten,   ← 6相机展平后的特征                   │
+│     prev_bev,       ← 旋转对齐后的历史BEV                 │
+│     shift,          ← 平移补偿向量                        │
+│   )                                                       │
+│   ↓ 内部：Temporal Self-Attention + Spatial Cross-Attention │
+└──────────────────────────────────────────────────────────┘
+                            ↓
+┌──────────────────────────────────────────────────────────┐
+│ 输出                                                      │
+│   bev_embed: (B, 10000, 256)  ← 统一的俯视图特征          │
+└──────────────────────────────────────────────────────────┘
+```
+
+#### **3.1.2 步骤1详解：自车运动信号**
+
+**为什么要加自车运动？** 因为车在动，上一帧和当前帧的坐标系不一样。
+
+**代码片段** (231-249行)：
+```python
+# 从CAN总线读取位移
+delta_x = can_bus[0]  # 自车x方向移动了多少米
+delta_y = can_bus[1]  # 自车y方向移动了多少米
+ego_angle = can_bus[-2]  # 当前朝向角
+
+# 计算在BEV网格上移动了多少格
+translation_length = sqrt(delta_x^2 + delta_y^2)
+shift_x = translation_length * sin(bev_angle) / grid_length_x / bev_w
+shift_y = translation_length * cos(bev_angle) / grid_length_y / bev_h
+```
+
+**物理含义**：
+```
+上一帧: 自车在 (0, 0)，前方5米有辆车在 (0, 5)
+        ↓ 自车前进3米
+当前帧: 自车在 (0, 3)，那辆车在 (0, 5) 不动
+        但在"自车中心坐标系"下，车的位置变成 (0, 2)
+
+shift = (0, -3/0.3 ≈ -10格)  # 3米前进 = BEV上-10格
+```
+
+**CAN总线18维编码** (266-270行)：
+```python
+can_bus = [
+    delta_x, delta_y, delta_z,           # 位移 (3维)
+    vx, vy, vz,                          # 速度 (3维)
+    ax, ay, az,                          # 加速度 (3维)
+    roll, pitch, yaw,                    # 姿态角 (3维)
+    roll_rate, pitch_rate, yaw_rate,     # 角速度 (3维)
+    rotation_angle, translation_length, translation_angle  # 组合特征 (3维)
+]  # 共18维
+
+# 用MLP编码到256维
+can_bus_embed = self.can_bus_mlp(can_bus)  # (B, 256)
+bev_queries = bev_queries + can_bus_embed[None, :, :]  # 广播加到每个网格
+```
+
+**为什么加到 bev_queries？** 让每个BEV网格点知道"车现在的运动状态"，在做时序融合时更合理。
+
+#### **3.1.3 步骤2详解：旋转 prev_bev**
+
+**代码片段** (254-264行)：
+```python
+rotation_angle = can_bus[-1]  # 自车转了多少度
+tmp_prev_bev = prev_bev.reshape(bev_h, bev_w, -1).permute(2, 0, 1)  # (256, 100, 100)
+tmp_prev_bev = rotate(tmp_prev_bev, rotation_angle, center=[50, 50])
+```
+
+**为什么要旋转？**
+```
+上一帧: 自车朝向 0°（正北）
+        BEV网格的"上方" = 北方
+        
+        ↓ 自车右转 30°
+        
+当前帧: 自车朝向 30°（东北）
+        BEV网格的"上方"仍应该是自车正前方
+        → 上一帧的BEV要跟着转30°
+```
+
+**类比**：拿着地图开车，转弯时要把地图跟着转，否则地图上"前方"和你眼前的"前方"对不上。
+
+#### **3.1.4 步骤3详解：加相机/尺度位置编码**
+
+**为什么需要这两个编码？**
+
+没有编码的情况：
+```python
+feat_flatten: (6, B, H*W, 256)
+# 6个相机的特征混在一起，模型无法区分：
+#   - 这是前视相机还是后视相机？
+#   - 这是高分辨率特征还是低分辨率特征？
+```
+
+加上编码后：
+```python
+feat = feat + self.cams_embeds[:, None, None, :]     # (6, 1, 1, 256)
+feat = feat + self.level_embeds[None, None, lvl:lvl+1, :]  # (1, 1, 1, 256)
+```
+
+**cams_embeds 的作用**：
+```
+相机0的特征 += cams_embeds[0]  # 前视相机的"签名"
+相机1的特征 += cams_embeds[1]  # 前左相机的"签名"
+...
+相机5的特征 += cams_embeds[5]  # 后视相机的"签名"
+```
+
+**level_embeds 的作用**：
+```
+尺度0 (大尺度) += level_embeds[0]  # "我是粗特征"
+尺度1 (中尺度) += level_embeds[1]  # "我是中等特征"
+...
+```
+
+**关键**：这是可学习参数（`nn.Parameter`），训练中自动学会如何标识不同相机和尺度。
+
+#### **3.1.5 步骤4详解：BEV Encoder 核心**
+
+**调用代码** (294-306行)：
+```python
+bev_embed = self.encoder(
+    bev_queries,      # (10000, B, 256)
+    feat_flatten,     # (6, B, ΣHW, 256)
+    feat_flatten,     # key 和 value 都用图像特征
+    bev_h=100,
+    bev_w=100,
+    bev_pos=bev_pos,           # BEV位置编码
+    spatial_shapes=...,        # 每个尺度的H×W
+    level_start_index=...,     # 每个尺度在flatten后的起始位置
+    prev_bev=prev_bev,         # 旋转对齐后的历史BEV
+    shift=shift,               # 平移补偿
+)
+```
+
+**encoder 内部（3层，每层做两件事）**：
+
+##### **a) Temporal Self-Attention**（时序自注意力）
+
+**代码位置**：`modules/temporal_self_attention.py`
+
+```python
+# 当前BEV query ↔ prev_bev
+current_bev_query: (B, 10000, 256)
+prev_bev:          (B, 10000, 256)
+
+# 用 shift 平移 prev_bev 的采样位置
+# 例如 shift=(0, -10)，表示车前进了10格
+# 那么当前(50,50)格的query，应该去看prev_bev的(50, 60)格
+
+# Deformable Attention 自动学习：
+#   - 网格(i,j)关注prev_bev哪些位置？
+#   - 权重多少？
+output = deformable_attn(
+    query=current_bev_query,
+    reference_points=shifted_positions,  # 用shift调整的位置
+    value=prev_bev
+)
+```
+
+**作用**：
+- 让BEV有"时序记忆"
+- 能感知物体运动方向（上一帧在A，这一帧在B → 正在向B方向运动）
+- 遮挡推理（上一帧某车被遮挡，根据轨迹推测现在位置）
+
+##### **b) Spatial Cross-Attention**（空间交叉注意力）⭐ 最关键
+
+**代码位置**：`modules/spatial_cross_attention.py` 的 `MSDeformableAttention3D`
+
+**核心流程**：
+```python
+for i in range(10000):  # 每个BEV网格点
+    # 1. 获取该网格点的3D坐标
+    bev_grid = (i // 100, i % 100)  # (row, col)
+    # 假设4个高度层
+    z_anchors = [-1.0, -0.5, 0.0, 0.5]  # 地面、腰部、头部、车顶
+    
+    for z in z_anchors:
+        # 2. 转换到自车中心坐标系
+        x_lidar = (bev_grid[0] - 50) * 0.3  # 50是中心，0.3是分辨率
+        y_lidar = (bev_grid[1] - 50) * 0.3
+        z_lidar = z
+        point_3d = [x_lidar, y_lidar, z_lidar, 1]  # 齐次坐标
+        
+        for cam_id in range(6):
+            # 3. 投影到相机像素坐标
+            lidar2img = img_metas[cam_id]['lidar2img']  # (4, 4)
+            pixel = lidar2img @ point_3d  # 矩阵乘法
+            u = pixel[0] / pixel[2]  # 归一化
+            v = pixel[1] / pixel[2]
+            depth = pixel[2]
+            
+            # 4. 检查是否在视野内
+            if depth > 0 and 0 <= u < W and 0 <= v < H:
+                # 5. 在(u,v)附近采样图像特征（deformable采样）
+                sampled_feat = deformable_sample(
+                    img_feats[cam_id], 
+                    center=(u, v),
+                    num_points=4  # 在中心附近采4个点
+                )
+                
+                # 6. 加权聚合
+                bev_feat[i] += attention_weight[cam_id, z] * sampled_feat
+```
+
+**关键点**：
+1. **多高度采样**：不知道物体真实高度（行人1.7m vs 卡车3m），所以假设多个高度
+2. **lidar2img 几何投影**：用标定矩阵精确计算"BEV点应该在图像哪个位置"
+3. **Deformable Attention**：不是在精确像素采样，而是在附近学习偏移（应对标定误差）
+4. **只命中1-2个相机**：每个3D点只能被少数相机看到（前视看不到后面）
+
+**可视化**：
+```
+BEV网格点 (50, 70)  ← 自车前方7米
+    ↓ 假设高度 z=0（地面）
+3D点 (0, 7, 0) 在自车坐标系
+    ↓ 投影到前视相机
+像素 (u=320, v=200) 在前视图像
+    ↓ 采样周围特征
+前视相机在(320,200)附近的256维特征
+    ↓ 融合
+BEV点(50,70)的特征 += 前视相机特征
+```
+
+### 3.2 两个 Attention 的分工
+
+| | Temporal Self-Attention | Spatial Cross-Attention |
+|---|---|---|
+| **Q (query)** | 当前帧BEV query | 当前帧BEV query |
+| **K, V** | prev_bev（历史BEV） | 6相机图像特征 |
+| **作用** | 时序融合 | 多视角融合 |
+| **学到什么** | 物体运动连续性 | 3D空间几何关系 |
+| **关键参数** | shift（平移补偿） | lidar2img（投影矩阵） |
+| **物理意义** | "这个位置上一帧是什么？" | "这个位置在6个相机里看起来像什么？" |
+
+**执行顺序**（在每层encoder中）：
+```python
+# 伪代码
+for layer in encoder.layers:
+    # 先时序
+    bev_query = temporal_self_attention(bev_query, prev_bev, shift)
+    # 再空间
+    bev_query = spatial_cross_attention(bev_query, img_feats, lidar2img)
+    # 前馈网络
+    bev_query = ffn(bev_query)
+```
+
+### 3.3 完整的信息流
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ 输入：6个相机的2D特征                                          │
+│   前视: (B, 256, 12, 20) - 看到前方车辆                       │
+│   前左: (B, 256, 12, 20) - 看到左侧车道                       │
+│   ...                                                         │
+│   后视: (B, 256, 12, 20) - 看到后方车辆                       │
+└──────────────────────────────────────────────────────────────┘
+                            ↓ 展平 + 加位置编码
+┌──────────────────────────────────────────────────────────────┐
+│ feat_flatten: (6, B, 240, 256)                                │
+│   含相机标识 + 尺度标识                                        │
+└──────────────────────────────────────────────────────────────┘
+                            ↓ 进入 BEV Encoder
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 1:                                                     │
+│   ① Temporal: 融合 prev_bev                                 │
+│      → 知道"上一帧哪些地方有车"                              │
+│   ② Spatial: 投影6相机特征到BEV                             │
+│      → 知道"这一帧6个相机看到什么"                           │
+│   ③ FFN: 特征变换                                           │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 2:                                                     │
+│   ① Temporal: 用Layer1输出 再次融合prev_bev                 │
+│   ② Spatial: 再次从6相机采样（学到更抽象的特征）             │
+│   ③ FFN                                                     │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 3:                                                     │
+│   ① Temporal: 第3次时序融合                                 │
+│   ② Spatial: 第3次空间融合                                  │
+│   ③ FFN                                                     │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌──────────────────────────────────────────────────────────────┐
+│ 输出：统一的BEV特征                                            │
+│   bev_embed: (B, 10000, 256)                                  │
+│   每个格子(0.3m×0.3m)的256维向量代表：                         │
+│     - 这里有什么物体（语义）                                   │
+│     - 物体在动吗（时序）                                       │
+│     - 从6个视角综合的结果                                      │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 3.4 关键设计细节
+
+#### **3.4.1 为什么是3层encoder？**
+
+| 层数 | 优势 | 劣势 |
+|------|------|------|
+| 1层 | 快 | 特征不够抽象 |
+| 3层 | ✅ 平衡（VAD_tiny） | — |
+| 6层 | 更抽象 | 慢2× |
+
+**3层的物理含义**：
+- Layer 1：初步融合（"6个相机各说各的"）
+- Layer 2：精炼特征（"综合不同视角的信息"）
+- Layer 3：最终表示（"形成统一的语义理解"）
+
+#### **3.4.2 为什么用 Deformable Attention？**
+
+**对比标准 Attention**：
+```python
+# 标准Attention：每个BEV点关注所有1440个图像位置（6×240）
+attn_weights = softmax(Q @ K^T / sqrt(d))  # (10000, 1440)
+output = attn_weights @ V  # 10000×1440 矩阵乘法，太慢！
+
+# Deformable Attention：每个BEV点只关注8个采样点
+for i in range(10000):
+    offsets = learnable_offset(query[i])  # 学习8个偏移量
+    sampled_values = sample(V, reference_points[i] + offsets)  # 只采8个点
+    output[i] = weighted_sum(sampled_values)  # 8次运算，快180倍！
+```
+
+**优势**：
+- ✅ 快：O(NK) 其中K=8是常数，vs 标准attention的O(N²)
+- ✅ 准：在几何投影位置附近学习精细偏移（应对标定误差）
+
+#### **3.4.3 为什么BEV分辨率是100×100？**
+
+| 分辨率 | 格子大小 | 优势 | 劣势 |
+|--------|---------|------|------|
+| 50×50 | 0.6m | 快 | 小物体漏检 |
+| **100×100** | **0.3m** | **✅ 平衡** | **VAD_tiny** |
+| 200×200 | 0.15m | 精细 | 慢4× |
+
+**0.3m的意义**：
+- ✅ 能区分"一辆车"（车宽~2m ≈ 7格）
+- ✅ 能分清"相邻两条车道"（车道宽3.5m ≈ 12格）
+- ❌ 看不清"自行车"（宽0.5m ≈ 2格，模糊）
+
+### 3.5 心智模型
+
+> **BEV Query 是"主动的侦察兵"**
+>
+> 10000个网格点，每个都拿着自己的3D坐标(x,y,z)，用相机标定矩阵算出"我应该在哪张图的哪个像素"，然后精准采样。
+>
+> 上一帧的prev_bev提供"记忆"，shift和rotate保证坐标系对齐。
+>
+> 3层encoder逐步精炼：初步融合 → 整合信息 → 最终表示。
+
+**类比**：
+- 图像特征 = 6个人各自的见闻报告
+- BEV encoder = 侦察队长，根据地图上每个位置，去问6个人"你们看到这里有什么"，然后综合成统一的俯视图情报
+
+---
+
+## 4. VAD Head 主体
+
+### 4.0 VADHead 结构总览
 
 **代码位置**：`VAD_head.py` 第72-433行（类定义与初始化）
 
@@ -1172,6 +1593,110 @@ self.map_reference_points = nn.Linear(256, 2)  # 地图：2D点(x,y)
 
 VAD 用 5 类 `nn.Embedding` 作为可学习的 Query（DETR范式）。
 
+##### **3.0.3.1 什么是 DETR 范式的"槽位"（Slot）？**
+
+**核心概念**：用可学习的向量代替手工设计的 anchor。
+
+**传统检测方法（Anchor-based）**：
+```python
+# 传统方法：先定义大量anchor（固定位置+固定尺寸的候选框）
+anchors = [
+    (x=10, y=20, w=30, h=40),  # anchor 1
+    (x=15, y=25, w=35, h=45),  # anchor 2
+    ...  # 可能有几万个
+]
+
+# 问题：
+# - anchor 的位置、尺寸是手工设计的超参数
+# - 需要大量 anchor（几万个）才能覆盖各种情况
+# - 训练时需要复杂的正负样本匹配规则（IoU 阈值）
+```
+
+**DETR 范式（Query-based）**：
+```python
+# DETR：直接学习 N 个"槽位"（object queries）
+object_queries = nn.Embedding(300, 512)  # 300个可学习的向量
+
+# 训练时，模型自己学会：
+# - 槽位1：负责预测"大型车辆"
+# - 槽位2：负责预测"左前方的行人"
+# - 槽位3：负责预测"远处的车"
+# ...
+# - 槽位300：作为备用（或预测背景）
+```
+
+**"槽位"的本质**：
+- 是 **N 个可学习的向量**（nn.Embedding 的参数）
+- 训练过程中，每个槽位会**自动学习**负责预测哪种类型/位置的物体
+- **不需要手工设计** anchor 的位置和尺寸
+
+**Anchor vs Query Slot 对比**：
+
+| 维度 | Anchor（传统） | Query Slot（DETR） |
+|------|---------------|-------------------|
+| **数量** | 几万个（如 YOLO 的 25200） | 几百个（VAD 的 300） |
+| **位置** | 手工设计的网格 | 自动学习 |
+| **尺寸** | 手工设计的固定尺寸 | 自动学习 |
+| **训练方式** | 正负样本匹配（IoU 阈值） | 匈牙利匹配（全局最优） |
+| **参数** | 不是网络参数 | 是可学习参数 |
+| **灵活性** | 固定的先验 | 数据驱动的先验 |
+
+##### **3.0.3.2 槽位如何"学会"职责？**
+
+**训练时的关键：匈牙利匹配**
+
+```python
+# 每次训练迭代：
+# 1. 模型输出 300 个预测
+predictions = model(image)  # 300 个预测框
+
+# 2. GT 只有 15 个真实物体
+gt_boxes = [car1, truck1, person1, ...]  # 15 个
+
+# 3. 匈牙利算法找最优配对
+# 最小化：Σ cost(pred_i, gt_j)
+# cost = 分类loss + 回归loss
+matched_pairs = hungarian_match(predictions, gt_boxes)
+# 结果：pred[5] ↔ car1, pred[23] ↔ truck1, ...
+
+# 4. 只对配对上的预测算loss
+for (pred_idx, gt_idx) in matched_pairs:
+    loss += cls_loss(predictions[pred_idx], gt[gt_idx])
+    loss += bbox_loss(predictions[pred_idx], gt[gt_idx])
+
+# 5. 没配对上的 285 个预测，算"背景"分类loss
+for pred_idx in unmatched:
+    loss += cls_loss(predictions[pred_idx], background_class)
+
+# 6. 反向传播
+loss.backward()  # 梯度更新 query_embedding 的权重
+```
+
+**几轮训练后**：
+- 某些 query 的权重收敛到"擅长预测车"
+- 某些 query 学会"关注前方区域"
+- 某些 query 学会"预测小物体"
+
+**类比理解**：
+
+```
+停车场类比：
+  训练前：300 个车位都是空的（随机初始化）
+  
+  训练后：
+    - 车位 1：专门停"大卡车"
+    - 车位 2：专门停"前方的小车"
+    - 车位 3：专门停"行人"
+    - ...
+    - 车位 250-300：通常空着（预测背景）
+  
+  推理时：
+    - 物体"自动"停到最合适的车位上
+    - 每个车位输出：这里有什么类型的物体？在哪？多大？
+```
+
+##### **3.0.3.3 VAD 的 5 类 Query**
+
 **代码位置**：`VAD_head.py` 第375-389行
 
 ```python
@@ -1195,6 +1720,236 @@ self.ego_query = nn.Embedding(1, 256)
 
 **Query 对照表**：
 
+| Query | 数量 | 维度 | 物理含义 | 说明 |
+|-------|------|------|---------|------|
+| bev_embedding | 10000 | 256 | 100×100 俯视图网格点 | 每个点 0.3m×0.3m |
+| query_embedding | 300 | 512 | 物体检测的 300 个候选槽位 | 512=256内容+256位置 |
+| map_query_embedding | 2000 | 512 | **100条线×20点** | 非2000条线！ |
+| motion_mode_query | 6 | 256 | 6 种行为（直/左/右/加/减/...） | 多模态预测 |
+| ego_query | 1 | 256 | 自车的查询向量 | Planning用 |
+
+##### **3.0.3.4 重点澄清：map_query_embeds 的结构**
+
+**关键问题**：`map_query_embeds` 对应 2000 个车道线？还是离散点？
+
+**答案**：VAD 使用 **`instance_pts` 模式**，对应的是：
+```
+✅ 100 条车道线（instance）
+✅ 每条线由 20 个有序点（pts）组成
+✅ 总共 2000 个 query embedding
+```
+
+**不是 2000 条独立的线，也不是 2000 个无序的离散点！**
+
+**代码中的组合方式**：
+
+```python
+# forward 中（VAD_head.py 第521-524行）
+if self.map_query_embed_type == 'instance_pts':
+    map_pts_embeds = self.map_pts_embedding.weight.unsqueeze(0)         # (1, 20, 512)
+    map_instance_embeds = self.map_instance_embedding.weight.unsqueeze(1)  # (100, 1, 512)
+    
+    # 广播相加：(100, 1, 512) + (1, 20, 512) → (100, 20, 512)
+    map_query_embeds = map_instance_embeds + map_pts_embeds
+    
+    # flatten 到 2000
+    map_query_embeds = map_query_embeds.flatten(0, 1)  # (2000, 512)
+
+# 含义：
+# query[0:20]      = 线1的20个点（instance1 + pts1~20）
+# query[20:40]     = 线2的20个点（instance2 + pts1~20）
+# ...
+# query[1980:2000] = 线100的20个点（instance100 + pts1~20）
+```
+
+**为什么这样设计？**
+
+| 方案 | 结构 | 优势 | 劣势 |
+|------|------|------|------|
+| **all_pts 模式** | 2000个独立点 | 灵活 | 点是无序的，需要后处理聚类成线 |
+| **instance_pts 模式** | 100条线×20点 | ✅ 直接输出完整的线<br>✅ 点的顺序有意义（polyline）<br>✅ 每条线还能预测类别 | 固定20个点/线 |
+
+**推理时的输出**：
+
+```python
+# Map Head 输出
+map_outputs_pts_coords: (B, 100, 20, 2)
+                        ↑   ↑   ↑   ↑
+                     batch 100条线 20点 xy
+
+map_outputs_classes: (B, 100, 4)
+                     ↑   ↑    ↑
+                  batch 100条线 4类（divider/boundary/crossing/bg）
+
+# 例如：
+# 线1: 类别=divider, 点序列=[(x1,y1), (x2,y2), ..., (x20,y20)]
+# 线2: 类别=boundary, 点序列=[(x1,y1), ..., (x20,y20)]
+# ...
+# 线50: 类别=background (置信度低，后处理时丢弃)
+```
+
+##### **3.0.3.5 BEV Query 的完整结构：embedding + mask + pos**
+
+**关键理解**：`bev_queries` 不是单独使用的，而是配合 `bev_mask` 和 `bev_pos` 一起工作。
+
+**代码位置**：`VAD_head.py` 第527-533行
+
+```python
+# 1. BEV Query embedding: 100×100 个网格点的可学习特征
+bev_queries = self.bev_embedding.weight  # (10000, 256)
+
+# 2. BEV mask: 有效性掩码（全0表示所有点都有效）
+bev_mask = torch.zeros((bs, 100, 100))  # (B, 100, 100)
+
+# 3. BEV position encoding: 位置编码（正弦编码）
+bev_pos = self.positional_encoding(bev_mask)  # (B, 256, 100, 100)
+```
+
+**三者的角色**：
+
+| 组件 | 形状 | 作用 | 可学习？ |
+|------|------|------|---------|
+| **bev_queries** | (10000, 256) | 内容特征："我通常关注什么" | ✅ 可学习参数 |
+| **bev_pos** | (B, 256, 100, 100) | 位置编码："我在哪个位置" | ❌ 固定计算（正弦编码） |
+| **bev_mask** | (B, 100, 100) | 有效性掩码："我是否参与计算" | ❌ 固定值（VAD中全0） |
+
+**重要澄清：mask 的真实作用**
+
+```python
+bev_pos = self.positional_encoding(bev_mask)  # (B, 256, 100, 100)
+```
+
+**常见误解**：位置编码是从 mask 的值"生成"的？
+
+**真相**：
+1. `positional_encoding` **只用 mask 的 shape (B, H, W)，不用 mask 的值**
+2. 位置编码只依赖网格坐标 (0~99, 0~99)，与 mask 的 0/1 值无关
+3. mask 的真实作用在后续的 **Attention 计算**中
+
+**为什么传 mask 而不是直接传 (B, H, W)？**
+
+这是 **mmcv/mmdet 框架的接口习惯**（继承自 DETR）：
+
+```python
+# positional_encoding 的实际实现逻辑（简化版）
+def positional_encoding(mask):
+    B, H, W = mask.shape  # ← 只用这一行！mask的值（0或1）被忽略
+    
+    # 生成网格坐标
+    y_coords = torch.arange(H)  # [0, 1, 2, ..., 99]
+    x_coords = torch.arange(W)  # [0, 1, 2, ..., 99]
+    
+    # 正弦/余弦编码（只依赖坐标，不依赖 mask 的值）
+    pos_y = sine_cosine_encode(y_coords)
+    pos_x = sine_cosine_encode(x_coords)
+    
+    return combine(pos_y, pos_x)  # (B, 256, H, W)
+```
+
+**mask 的真实含义和用途**：
+
+| 阶段 | mask 的作用 |
+|------|-----------|
+| **生成位置编码时** | ❌ 不使用值，只用 shape |
+| **Attention 计算时** | ✅ mask=1 的位置不参与计算 |
+
+**在 Attention 中的实际作用**：
+
+```python
+# BEV Encoder 的 Spatial Cross-Attention 中
+class SpatialCrossAttention:
+    def forward(self, query, value, bev_mask):
+        # 计算 attention 权重
+        attn_weights = compute_attention(query, value)
+        
+        # mask 在这里起作用！
+        if bev_mask is not None:
+            # mask=1 的位置 → attention 权重变成 -inf
+            attn_weights = attn_weights.masked_fill(
+                bev_mask.flatten(1).unsqueeze(-1),
+                float('-inf')
+            )
+        
+        # softmax 后，-inf 变成 0
+        attn_weights = attn_weights.softmax(dim=-1)
+        # → mask=1 的网格点权重为 0，不参与特征聚合
+```
+
+**mask 的物理含义**：
+
+```python
+bev_mask[b, i, j] = 1  # 表示：第 b 个样本的 (i, j) 网格点"无效"
+
+无效的原因可能是：
+  - 超出所有相机视野
+  - 被遮挡（如车身后方）
+  - 太远/太近（超出有效感知范围）
+
+VAD 中：
+  bev_mask = torch.zeros(...)  # 全 0 = 所有网格点都有效
+```
+
+**为什么 VAD 的 mask 全是 0？**
+
+- VAD 的 BEV 覆盖范围是 **固定的** [-15, -30] 到 [15, 30] 米
+- 6 个相机的视野已经覆盖了这个范围的大部分
+- 没有 padding（图像大小固定）
+- 所以**默认所有网格点都有效**
+
+**未来可能的扩展**：
+
+```python
+# 如果要标记"相机盲区"：
+bev_mask = torch.zeros((bs, 100, 100))
+bev_mask[:, 0:10, :]  = 1  # 车后方 10 行网格（相机看不到）
+bev_mask[:, :, 0:5]   = 1  # 左侧 5 列（左盲区）
+bev_mask[:, :, 95:100] = 1  # 右侧 5 列（右盲区）
+
+# 这些 mask=1 的位置在 Attention 时不会从图像采样特征
+```
+
+**三者在 Transformer 中的协同作用**：
+
+```python
+# BEVFormerEncoder 内部（简化版）
+
+# 1. Query = bev_queries + bev_pos
+query = bev_queries + bev_pos  # (B, 10000, 256)
+#       ↑ 内容        ↑ 位置
+#       "我关注什么"  "我在哪里"
+
+# 2. 每个 BEV 网格点根据其位置投影到 6 个相机
+for i in range(10000):
+    grid_pos = get_3d_position(i, bev_pos)  # 从位置编码推出 3D 坐标
+    
+    # 如果 mask=1，跳过这个网格点
+    if bev_mask[i] == 1:
+        continue
+    
+    # 投影到每个相机并采样图像特征
+    for cam in range(6):
+        pixel_pos = project(grid_pos, cam_intrinsic[cam])
+        img_feat = sample(img_features[cam], pixel_pos)
+        bev_feature[i] += attention_weight * img_feat
+
+# 3. 输出：bev_embed (B, 10000, 256)
+# 每个网格点融合了从 6 个相机采样的信息
+```
+
+**对比三类 Query 的完整结构**：
+
+| Query 类型 | Content Embedding | Position Encoding | Mask |
+|-----------|------------------|-------------------|------|
+| **bev_queries** | ✅ (10000, 256) 可学习 | ✅ (B, 256, 100, 100) 正弦编码 | ✅ (B, 100, 100) 全0 |
+| **object_queries** | ✅ (300, 512) 可学习，含位置 | ❌ 位置信息已包含在512维中 | ❌ 无需mask |
+| **map_queries** | ✅ (2000, 512) 可学习，含位置 | ❌ 位置信息已包含在512维中 | ❌ 无需mask |
+
+**为什么只有 BEV 需要单独的位置编码？**
+- BEV：10000 个点是**稠密网格**，位置是固定的 2D 坐标 → 用正弦编码
+- Detection/Map：300/100 个槽位是**稀疏的**，位置是要预测的 → 位置信息直接学在 embedding 里
+
+**Query 对照表**：
+
 | Query | 数量 | 维度 | 物理含义 |
 |-------|------|------|---------|
 | bev_embedding | 10000 | 256 | 100×100 俯视图网格点 |
@@ -1209,6 +1964,144 @@ self.ego_query = nn.Embedding(1, 256)
 # forward 中的用法
 object_query_embeds = self.query_embedding.weight  # (300, 512)
 # 拆成 content(256) + pos(256)，分别用于 query 和 query_pos
+```
+
+##### **3.0.3.6 Query 的"准备 vs 使用"职责分工**
+
+**核心观察**：在调用 `self.transformer(...)` 之前，3 种 query 已经在 `VADHead.forward` 里准备好了。这体现了一个清晰的**职责分离**设计。
+
+**职责分工**：
+
+| 阶段 | 在哪里 | 做什么 |
+|------|--------|--------|
+| **定义** | `VADHead.__init__` | 创建 `nn.Embedding` 参数 |
+| **取出** | `VADHead.forward` | `.weight` 取出 3 种 query |
+| **传递** | `VADHead.forward` | 作为参数传给 `self.transformer` |
+| **使用** | `VADPerceptionTransformer.forward` | 拆分 + attention 计算 |
+
+**代码流程**：
+
+```python
+# ========== 第1步：VADHead.forward 准备 query ==========
+# (VAD_head.py 第514-528行)
+object_query_embeds = self.query_embedding.weight       # (300, 512)
+map_query_embeds = (map_pts_embeds + map_instance_embeds).flatten(0, 1)  # (2000, 512)
+bev_queries = self.bev_embedding.weight                 # (10000, 256)
+
+# ========== 第2步：传给 transformer ==========
+# (VAD_head.py 第535行)
+outputs = self.transformer(
+    mlvl_feats,
+    bev_queries,          # ← BEV query 传入
+    object_query_embeds,  # ← 检测 query 传入
+    map_query_embeds,     # ← 地图 query 传入
+    ...
+)
+
+# ========== 第3步：transformer 内部使用 ==========
+# (VAD_transformer.py forward)
+# BEV query → BEV Encoder
+bev_embed = self.get_bev_features(mlvl_feats, bev_queries, ...)
+# 检测 query → 拆分成 query + query_pos
+query_pos, query = torch.split(object_query_embed, self.embed_dims, dim=1)
+# 地图 query → 拆分成 query + query_pos
+map_query_pos, map_query = torch.split(map_query_embed, self.embed_dims, dim=1)
+```
+
+**为什么 embedding 定义在 head 而不是 transformer？**
+
+| 原因 | 说明 |
+|------|------|
+| **参数归属清晰** | query embedding 是 head 的"语义定义"（300个检测槽位、100条地图线） |
+| **transformer 通用** | transformer 只负责"算 attention"，不关心 query 的语义 |
+| **复用性** | 同一个 transformer 结构可配不同的 query（换检测数量只改 head） |
+
+**类比**：
+- **VADHead** = 工厂老板，拥有"图纸"（query embedding 参数）
+- **transformer** = 车间，拿图纸（query）去"生产"（attention 计算）
+
+##### **3.0.3.7 Query 是"固定参数"，不是"动态生成"**
+
+**重要澄清**：query 在"生成"时，只是**取出默认初始化的参数**，没有任何动态生成逻辑。
+
+```python
+# VAD_head.py forward 中
+object_query_embeds = self.query_embedding.weight  # 就是取参数，没有"生成"
+bev_queries = self.bev_embedding.weight            # 同样，就是取参数
+```
+
+**参数 vs 计算的区分**：
+
+```python
+# ===== "生成"阶段（初始化，只做一次）=====
+# VADHead.__init__ 中
+self.query_embedding = nn.Embedding(300, 512)
+# 内部：weight = torch.randn(300, 512) * 0.02  ← 随机初始化
+
+# ===== "使用"阶段（每次 forward）=====
+# 只是取出参数，没有任何"生成"操作
+object_query_embeds = self.query_embedding.weight
+```
+
+**对比：什么是"动态生成"？**（VAD 没有这样做）
+
+```python
+# ❌ 假设的动态生成代码（VAD 不是这样）
+image_feat = extract_features(img)              # (B, 256)
+object_query_embeds = self.query_generator(image_feat)  # 用MLP根据图像生成
+# → 每张图有不同的 query
+
+# ✅ VAD 的实际做法
+object_query_embeds = self.query_embedding.weight  # 所有图用同一组固定参数
+```
+
+**为什么用"固定参数"而非"动态生成"？（DETR 范式核心）**
+
+| 设计选择 | VAD 的做法 | 原因 |
+|---------|-----------|------|
+| **query 数量** | 固定 300 个 | 简单、稳定 |
+| **query 内容** | 固定参数（可学习） | 训练中自动分工 |
+| **与输入的关系** | 无关（所有图像用同一组） | 模型通过 attention 自适应 |
+
+**关键：Attention 是"自适应"的关键**
+
+```python
+# 场景1：空旷高速（5 个物体）
+outputs = model(highway_img)
+# 300 个 query 中：5个预测物体（高置信度），295个预测背景
+
+# 场景2：拥堵路口（50 个物体）
+outputs = model(urban_img)
+# 同样这 300 个 query：50个预测物体，250个预测背景
+```
+
+虽然 query 参数固定，但每个 query 的 **attention 权重是动态的**：
+- Query 1 在高速上可能关注"远处的车"
+- Query 1 在路口可能关注"近处的行人"
+- 通过 attention，固定的 query 能自适应不同场景
+
+**Query 的完整生命周期**：
+
+```
+┌─────────────────────────────────────────────────┐
+│ 初始化（模型创建时，只做一次）                    │
+│   self.query_embedding = nn.Embedding(300, 512)  │
+│   weight = torch.randn(300, 512) * 0.02          │
+│   ↑ 随机初始化                                    │
+└─────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────┐
+│ 训练（数千次迭代）                                │
+│   forward: query = self.query_embedding.weight   │
+│   loss.backward() → 梯度更新 query 参数           │
+│   训练后：query[0]擅长大车, query[1]擅长行人...   │
+└─────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────┐
+│ 推理（每次都用同一组学好的 query）                │
+│   query = self.query_embedding.weight（已学好）   │
+│   通过 attention 自适应当前场景                   │
+└─────────────────────────────────────────────────┘
 ```
 
 #### **3.0.4 【三】预测分支：FFN Heads**
