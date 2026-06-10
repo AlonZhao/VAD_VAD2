@@ -751,92 +751,157 @@ class VADHead(DETRHead):
         outputs_trajs = torch.stack(outputs_trajs)
         outputs_trajs_classes = torch.stack(outputs_trajs_classes)
 
-        # planning
-        (batch, num_agent) = motion_hs.shape[:2]
+        # ═══════════════════════════════════════════════════════════════
+        # Planning 规划模块：ego query 与环境交互 → 输出自车未来轨迹
+        # ═══════════════════════════════════════════════════════════════
+
+        # ─── 第0步：初始化 ego query ───
+        (batch, num_agent) = motion_hs.shape[:2]  # motion_hs: (B, 300, 6, 512) → B, 300
+
+        # 两种初始化方式（取决于配置）：
         if self.ego_his_encoder is not None:
-            ego_his_feats = self.ego_his_encoder(ego_his_trajs)  # [B, 1, dim]
+            # 方式1（base配置）: 编码历史轨迹 (B, 1, 2, 3) → (B, 1, 256)
+            # ego_his_trajs: 过去1秒2步的自车轨迹，含 (x,y,yaw)
+            ego_his_feats = self.ego_his_encoder(ego_his_trajs)  # [B, 1, 256]
         else:
-            ego_his_feats = self.ego_query.weight.unsqueeze(0).repeat(batch, 1, 1)
-        # Interaction
-        ego_query = ego_his_feats
-        ego_pos = torch.zeros((batch, 1, 2), device=ego_query.device)
-        ego_pos_emb = self.ego_agent_pos_mlp(ego_pos)
-        agent_conf = outputs_classes[-1]
-        agent_query = motion_hs.reshape(batch, num_agent, -1)
-        agent_query = self.agent_fus_mlp(agent_query) # [B, A, fut_mode, 2*D] -> [B, A, D]
-        agent_pos = outputs_coords_bev[-1]
+            # 方式2（tiny配置）: 可学习的纯query，无历史信息
+            # self.ego_query: nn.Embedding(1, 256)，一张"白纸"
+            ego_his_feats = self.ego_query.weight.unsqueeze(0).repeat(batch, 1, 1)  # [B, 1, 256]
+
+        # ─── 第1步：ego ↔ agent 交互（ego看车） ───
+        ego_query = ego_his_feats  # (B, 1, 256) ego的初始特征
+
+        # ego位置永远是原点(0,0)，因为坐标系是"自车中心系"
+        ego_pos = torch.zeros((batch, 1, 2), device=ego_query.device)  # (B, 1, 2)
+        ego_pos_emb = self.ego_agent_pos_mlp(ego_pos)  # (B, 1, 256) 位置编码
+
+        # 准备 agent 食材（来自Motion Head）
+        agent_conf = outputs_classes[-1]  # (B, 300, 10) 每个agent的10类置信度，用于筛选
+
+        # motion_hs 原始形状：(B, 300, 6, 512)
+        #   300 = agent数量
+        #   6   = 多模态数（6条可能的未来轨迹意图）
+        #   512 = 2*256（前256=agent间self-attn，后256=agent↔map cross-attn）
+        agent_query = motion_hs.reshape(batch, num_agent, -1)  # (B, 300, 6*512=3072)
+
+        # 融合6个模态 → 压缩成1个特征向量
+        # 特征含义：这辆车的"位置+6种可能意图+周围车交互+地图约束"的浓缩表示
+        agent_query = self.agent_fus_mlp(agent_query)  # (B, 300, 3072) → (B, 300, 256)
+
+        agent_pos = outputs_coords_bev[-1]  # (B, 300, 2) agent在BEV上的归一化坐标，且已detach
+
+        # 筛选 + padding对齐：滤掉低置信度假目标，补齐batch内长度差异
+        # agent_mask: (B, max_n) padding的位置=True，真实agent=False
         agent_query, agent_pos, agent_mask = self.select_and_pad_query(
             agent_query, agent_pos, agent_conf,
-            score_thresh=self.query_thresh, use_fix_pad=self.query_use_fix_pad
-        )
-        agent_pos_emb = self.ego_agent_pos_mlp(agent_pos)
-        # ego <-> agent interaction
-        ego_agent_query = self.ego_agent_decoder(
-            query=ego_query.permute(1, 0, 2),
-            key=agent_query.permute(1, 0, 2),
-            value=agent_query.permute(1, 0, 2),
-            query_pos=ego_pos_emb.permute(1, 0, 2),
-            key_pos=agent_pos_emb.permute(1, 0, 2),
-            key_padding_mask=agent_mask)
+            score_thresh=self.query_thresh,  # tiny=0.0几乎不筛，base>0会真筛
+            use_fix_pad=self.query_use_fix_pad
+        )  # → (B, max_n, 256), (B, max_n, 2), (B, max_n)
+        agent_pos_emb = self.ego_agent_pos_mlp(agent_pos)  # (B, max_n, 256) agent位置编码
 
-        # ego <-> map interaction
-        ego_pos = torch.zeros((batch, 1, 2), device=agent_query.device)
-        ego_pos_emb = self.ego_map_pos_mlp(ego_pos)
+        # cross-attention：ego作为query，agent作为key/value
+        # 含义：ego学习"关注哪些车重要"（前方近车高权重，后方远车低权重）
+        # key_padding_mask 让attention跳过padding的假agent
+        ego_agent_query = self.ego_agent_decoder(
+            query=ego_query.permute(1, 0, 2),            # (1, B, 256) ego query（1个）
+            key=agent_query.permute(1, 0, 2),            # (max_n, B, 256) 所有agent作为key
+            value=agent_query.permute(1, 0, 2),          # (max_n, B, 256) 所有agent作为value
+            query_pos=ego_pos_emb.permute(1, 0, 2),      # (1, B, 256) ego位置编码
+            key_pos=agent_pos_emb.permute(1, 0, 2),      # (max_n, B, 256) agent位置编码
+            key_padding_mask=agent_mask)                 # (B, max_n) True=padding要跳过
+        # 输出: (1, B, 256) → ego query已融合"周围车的信息"
+
+        # ─── 第2步：ego ↔ map 交互（ego看路）───
+        # 注意：这里query接的是ego_agent_query（级联！）
+        # 先看完车，带着"车的认知"再去看路
+        ego_pos = torch.zeros((batch, 1, 2), device=agent_query.device)  # ego永远在原点
+        ego_pos_emb = self.ego_map_pos_mlp(ego_pos)  # (B, 1, 256) ego位置编码（map版本）
+
+        # 准备 map 食材（来自Map Head）
         map_query = map_hs[-1].view(batch_size, self.map_num_vec, self.map_num_pts_per_vec, -1)
-        map_query = self.lane_encoder(map_query)  # [B, P, pts, D] -> [B, P, D]
-        map_conf = map_outputs_classes[-1]
-        map_pos = map_outputs_coords_bev[-1]
-        # use the most close pts pos in each map inst as the inst's pos
-        batch, num_map = map_pos.shape[:2]
-        map_dis = torch.sqrt(map_pos[..., 0]**2 + map_pos[..., 1]**2)
-        min_map_pos_idx = map_dis.argmin(dim=-1).flatten()  # [B*P]
-        min_map_pos = map_pos.flatten(0, 1)  # [B*P, pts, 2]
-        min_map_pos = min_map_pos[range(min_map_pos.shape[0]), min_map_pos_idx]  # [B*P, 2]
-        min_map_pos = min_map_pos.view(batch, num_map, 2)  # [B, P, 2]
+        # map_hs[-1]: (B, 100*20, 256) → reshape成 (B, 100, 20, 256)
+        # 100条车道线，每条20个点
+
+        # LaneNet: 聚合每条线的20个点 → 1个向量
+        # 类似PointNet的max-pool，提取整条线的特征
+        map_query = self.lane_encoder(map_query)  # (B, 100, 20, 256) → (B, 100, 256)
+        # 特征含义：每条车道线的"类别(分道线/边界/人行道) + 形状 + 朝向"
+
+        map_conf = map_outputs_classes[-1]  # (B, 100, 3) 每条线的3类置信度
+        map_pos = map_outputs_coords_bev[-1]  # (B, 100, 20, 2) 每条线20个点的归一化坐标
+
+        # 找每条线"离自车最近的点"作为该线的位置代表
+        # 原因：一条线可能很长，最近的部分对当下决策最相关
+        batch, num_map = map_pos.shape[:2]  # B, 100
+        map_dis = torch.sqrt(map_pos[..., 0]**2 + map_pos[..., 1]**2)  # (B, 100, 20) 每点到原点距离
+        min_map_pos_idx = map_dis.argmin(dim=-1).flatten()  # (B*100,) 每条线的最近点索引
+        min_map_pos = map_pos.flatten(0, 1)  # (B*100, 20, 2) 展平batch和线
+        min_map_pos = min_map_pos[range(min_map_pos.shape[0]), min_map_pos_idx]  # (B*100, 2) 取最近点
+        min_map_pos = min_map_pos.view(batch, num_map, 2)  # (B, 100, 2) 恢复形状
+
+        # 筛选 + padding对齐（同agent逻辑）
         map_query, map_pos, map_mask = self.select_and_pad_query(
             map_query, min_map_pos, map_conf,
-            score_thresh=self.query_thresh, use_fix_pad=self.query_use_fix_pad
-        )
-        map_pos_emb = self.ego_map_pos_mlp(map_pos)
+            score_thresh=self.query_thresh,  # tiny=0.0几乎不筛
+            use_fix_pad=self.query_use_fix_pad
+        )  # → (B, max_m, 256), (B, max_m, 2), (B, max_m)
+
+        map_pos_emb = self.ego_map_pos_mlp(map_pos)  # (B, max_m, 256) 车道线位置编码
+
+        # cross-attention：ego_agent_query作为query，map作为key/value
+        # 含义：ego学习"关注哪些车道线相关"（当前车道+要拐入的车道高权重）
         ego_map_query = self.ego_map_decoder(
-            query=ego_agent_query,
-            key=map_query.permute(1, 0, 2),
-            value=map_query.permute(1, 0, 2),
-            query_pos=ego_pos_emb.permute(1, 0, 2),
-            key_pos=map_pos_emb.permute(1, 0, 2),
-            key_padding_mask=map_mask)
+            query=ego_agent_query,                       # (1, B, 256) ← 接上一步输出（级联！）
+            key=map_query.permute(1, 0, 2),              # (max_m, B, 256) 车道线作为key
+            value=map_query.permute(1, 0, 2),            # (max_m, B, 256) 车道线作为value
+            query_pos=ego_pos_emb.permute(1, 0, 2),      # (1, B, 256) ego位置编码
+            key_pos=map_pos_emb.permute(1, 0, 2),        # (max_m, B, 256) 车道线位置编码
+            key_padding_mask=map_mask)                   # (B, max_m) True=padding要跳过
+        # 输出: (1, B, 256) → ego query已融合"车+路的信息"
 
+        # ─── 第3步：拼接特征 ───
+        # 四种配置分支（取决于是否用历史轨迹和CAN特征）
         if self.ego_his_encoder is not None and self.ego_lcf_feat_idx is not None:
+            # 配置1（最全）: 历史轨迹编码 + 看完地图 + CAN特征
             ego_feats = torch.cat(
-                [ego_his_feats,
-                 ego_map_query.permute(1, 0, 2),
-                 ego_lcf_feat.squeeze(1)[..., self.ego_lcf_feat_idx]],
+                [ego_his_feats,                          # (B, 1, 256) 自车历史轨迹编码
+                 ego_map_query.permute(1, 0, 2),         # (B, 1, 256) ego看完车和路
+                 ego_lcf_feat.squeeze(1)[..., self.ego_lcf_feat_idx]],  # (B, 1, lcf_dim) CAN速度等
                 dim=-1
-            )  # [B, 1, 2D+2]
+            )  # (B, 1, 2*256+lcf_dim) 特征最丰富
         elif self.ego_his_encoder is not None and self.ego_lcf_feat_idx is None:
+            # 配置2: 历史轨迹 + 看完地图（无CAN）
             ego_feats = torch.cat(
-                [ego_his_feats,
-                 ego_map_query.permute(1, 0, 2)],
+                [ego_his_feats,                          # (B, 1, 256)
+                 ego_map_query.permute(1, 0, 2)],        # (B, 1, 256)
                 dim=-1
-            )  # [B, 1, 2D]
-        elif self.ego_his_encoder is None and self.ego_lcf_feat_idx is not None:                
+            )  # (B, 1, 512)
+        elif self.ego_his_encoder is None and self.ego_lcf_feat_idx is not None:
+            # 配置3: 看车和路 + CAN特征（无历史轨迹编码）
             ego_feats = torch.cat(
-                [ego_agent_query.permute(1, 0, 2),
-                 ego_map_query.permute(1, 0, 2),
-                 ego_lcf_feat.squeeze(1)[..., self.ego_lcf_feat_idx]],
+                [ego_agent_query.permute(1, 0, 2),       # (B, 1, 256) ego看车的结果
+                 ego_map_query.permute(1, 0, 2),         # (B, 1, 256) ego看路的结果
+                 ego_lcf_feat.squeeze(1)[..., self.ego_lcf_feat_idx]],  # (B, 1, lcf_dim)
                 dim=-1
-            )  # [B, 1, 2D+2]
-        elif self.ego_his_encoder is None and self.ego_lcf_feat_idx is None:                
+            )  # (B, 1, 2*256+lcf_dim)
+        elif self.ego_his_encoder is None and self.ego_lcf_feat_idx is None:
+            # 配置4（tiny，最精简）: 只有看车和路的结果
             ego_feats = torch.cat(
-                [ego_agent_query.permute(1, 0, 2),
-                 ego_map_query.permute(1, 0, 2)],
+                [ego_agent_query.permute(1, 0, 2),       # (B, 1, 256) ego看车的结果
+                 ego_map_query.permute(1, 0, 2)],        # (B, 1, 256) ego看路的结果
                 dim=-1
-            )  # [B, 1, 2D]  
+            )  # (B, 1, 512)
+            # 特征含义：融合了"周围车的位置+意图"和"相关车道线的形状+朝向"
 
-        # Ego prediction
-        outputs_ego_trajs = self.ego_fut_decoder(ego_feats)
-        outputs_ego_trajs = outputs_ego_trajs.reshape(outputs_ego_trajs.shape[0], 
-                                                      self.ego_fut_mode, self.fut_ts, 2)
+        # ─── 第4步：解码出轨迹 ───
+        # MLP: ego_feats → 3条候选轨迹（对应导航指令：左/直/右）
+        outputs_ego_trajs = self.ego_fut_decoder(ego_feats)  # (B, 1, 3*6*2=36)
+        outputs_ego_trajs = outputs_ego_trajs.reshape(outputs_ego_trajs.shape[0],
+                                                      self.ego_fut_mode,  # 3个模态（左/直/右）
+                                                      self.fut_ts,        # 6步（3秒）
+                                                      2)                  # (x,y)位移
+        # 输出: (B, 3, 6, 2) 3条候选轨迹，每条6步×(x,y)
+        # 推理时根据 ego_fut_cmd ∈ {0,1,2} 选其中1条
 
         outs = {
             'bev_embed': bev_embed,
