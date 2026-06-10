@@ -736,7 +736,7 @@ class VADHead(DETRHead):
         else:
             raise NotImplementedError('Not implement yet')
 
-        outputs_traj = self.traj_branches[0](motion_hs)
+        outputs_traj = self.traj_branches[0](motion_hs) # 中间产物
         outputs_trajs.append(outputs_traj)
         outputs_traj_class = self.traj_cls_branches[0](motion_hs)
         outputs_trajs_classes.append(outputs_traj_class.squeeze(-1))

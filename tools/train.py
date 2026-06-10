@@ -107,7 +107,8 @@ def parse_args():
 
 def main():
     args = parse_args()
-
+#    use ：python tools/train.py projects/configs/VAD/VAD_tiny_e2e.py
+#   # args.config = "projects/configs/VAD/VAD_tiny_e2e.py"
     cfg = Config.fromfile(args.config)
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
@@ -252,6 +253,7 @@ def main():
             if hasattr(datasets[0], 'PALETTE') else None)
     # add an attribute for visualization convenience
     model.CLASSES = datasets[0].CLASSES
+    # 启动训练
     custom_train_model(
         model,
         datasets,
