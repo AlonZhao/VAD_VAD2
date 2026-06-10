@@ -1,0 +1,4217 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "VAD",
+    "description": "VAD (Vectorized Scene Representation for Efficient Autonomous Driving) 是端到端自动驾驶系统,基于 mmdetection3d 与 BEVFormer 构建。采用向量化场景表示、BEV 特征提取与端到端规划,包含 VADv1 (ICCV 2023) 与 VADv2 (ICLR 2026) 两个版本。仓库还含有大量中文文档(模型架构详解、数据处理、面试题库等)。",
+    "languages": [
+      "Python",
+      "Markdown",
+      "Shell",
+      "JSON"
+    ],
+    "frameworks": [
+      "PyTorch",
+      "mmdetection3d",
+      "mmdet",
+      "mmcv-full",
+      "BEVFormer",
+      "nuScenes-devkit"
+    ],
+    "analyzedAt": "2026-06-08T07:59:33+00:00",
+    "gitCommitHash": "a05bfd61ccea258ec4772d28864c4fccd88a30ed"
+  },
+  "nodes": [
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "summary": "BEVFormer 包入口,导出 dense_heads、detectors、modules、runner、hooks 子模块",
+      "filePath": "projects/mmdet3d_plugin/bevformer/__init__.py",
+      "tags": [
+        "包入口",
+        "模块导出"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/detectors/__init__.py",
+      "type": "file",
+      "name": "detectors/__init__.py",
+      "summary": "检测器子模块入口,导出 BEVFormer 与 BEVFormer_fp16",
+      "filePath": "projects/mmdet3d_plugin/bevformer/detectors/__init__.py",
+      "tags": [
+        "模块导出",
+        "检测器"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py",
+      "type": "file",
+      "name": "bevformer.py",
+      "summary": "BEVFormer 主检测器,负责图像特征提取、时序 BEV 特征获取与训练/推理前向流程",
+      "filePath": "projects/mmdet3d_plugin/bevformer/detectors/bevformer.py",
+      "tags": [
+        "检测器",
+        "BEV特征",
+        "时序建模",
+        "端到端感知"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/detectors/bevformer_fp16.py",
+      "type": "file",
+      "name": "bevformer_fp16.py",
+      "summary": "BEVFormer 的 FP16 混合精度版本,重写 forward_train 与 val_step 以支持半精度训练",
+      "filePath": "projects/mmdet3d_plugin/bevformer/detectors/bevformer_fp16.py",
+      "tags": [
+        "检测器",
+        "混合精度",
+        "FP16"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:BEVFormer",
+      "type": "class",
+      "name": "BEVFormer",
+      "summary": "核心检测器类,继承 MVXTwoStageDetector,实现多相机图像特征抽取、时序 prev_bev 迭代获取以及 forward_train/forward_test 全流程,是 BEV 感知主干",
+      "tags": [
+        "检测器",
+        "BEV特征",
+        "时序建模",
+        "多相机"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/detectors/bevformer_fp16.py:BEVFormer_fp16",
+      "type": "class",
+      "name": "BEVFormer_fp16",
+      "summary": "继承 BEVFormer 的 FP16 版本,解决默认版本无法支持半精度训练的问题,并提供 val_step 推理 prev_bev",
+      "tags": [
+        "检测器",
+        "混合精度",
+        "FP16"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:extract_img_feat",
+      "type": "function",
+      "name": "extract_img_feat",
+      "summary": "对多相机图像做 backbone+neck 特征提取,支持 GridMask 增强,并按队列长度重排特征形状",
+      "tags": [
+        "特征提取",
+        "多相机",
+        "图像主干"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:obtain_history_bev",
+      "type": "function",
+      "name": "obtain_history_bev",
+      "summary": "无梯度地迭代历史帧图像,逐帧调用检测头生成历史 BEV 特征 prev_bev,用于时序融合",
+      "tags": [
+        "BEV特征",
+        "时序建模",
+        "历史帧"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:forward_train",
+      "type": "function",
+      "name": "forward_train",
+      "summary": "训练前向:拆分历史帧与当前帧,获取 prev_bev,提取当前帧特征并计算检测头损失",
+      "tags": [
+        "训练",
+        "BEV特征",
+        "时序建模"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:forward_test",
+      "type": "function",
+      "name": "forward_test",
+      "summary": "推理前向:按场景管理 prev_bev 缓存,计算 ego 位姿增量并调用 simple_test",
+      "tags": [
+        "推理",
+        "时序建模",
+        "位姿"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:simple_test",
+      "type": "function",
+      "name": "simple_test",
+      "summary": "无增强推理:提取图像特征并调用 simple_test_pts 得到 BEV 特征与 3D 框结果",
+      "tags": [
+        "推理",
+        "BEV特征",
+        "3D检测"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:forward_pts_train",
+      "type": "function",
+      "name": "forward_pts_train",
+      "summary": "调用 pts_bbox_head 前向得到预测,并计算检测损失",
+      "tags": [
+        "训练",
+        "损失计算",
+        "检测头"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/dense_heads/__init__.py",
+      "type": "file",
+      "name": "dense_heads/__init__.py",
+      "summary": "检测头子模块入口,导出 BEVFormerHead",
+      "filePath": "projects/mmdet3d_plugin/bevformer/dense_heads/__init__.py",
+      "tags": [
+        "模块导出",
+        "检测头"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py",
+      "type": "file",
+      "name": "bevformer_head.py",
+      "summary": "BEVFormer 检测头,基于 DETR 范式生成 BEV 查询,经 Transformer 输出 3D 框分类与回归,并计算匈牙利匹配损失",
+      "filePath": "projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py",
+      "tags": [
+        "检测头",
+        "BEV特征",
+        "Transformer",
+        "3D检测",
+        "损失计算"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:BEVFormerHead",
+      "type": "class",
+      "name": "BEVFormerHead",
+      "summary": "继承 DETRHead 的 BEV 检测头,维护 BEV 查询与位置编码,驱动 PerceptionTransformer 生成 BEV 特征并预测 3D 框,支持 box refine 与两阶段",
+      "tags": [
+        "检测头",
+        "BEV特征",
+        "Transformer",
+        "3D检测"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:forward",
+      "type": "function",
+      "name": "forward",
+      "summary": "检测头前向:构造 BEV 查询与位置编码,调用 transformer 得到 BEV embed 与 query,经分类/回归分支输出预测;only_bev 时仅产 BEV 特征",
+      "tags": [
+        "检测头",
+        "BEV特征",
+        "前向推理"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:loss",
+      "type": "function",
+      "name": "loss",
+      "summary": "计算多解码层的分类与边框回归损失,聚合各层损失字典",
+      "tags": [
+        "损失计算",
+        "训练"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:get_bboxes",
+      "type": "function",
+      "name": "get_bboxes",
+      "summary": "通过 bbox_coder 解码预测,生成最终 3D 检测框、分数与标签",
+      "tags": [
+        "后处理",
+        "3D检测",
+        "解码"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:get_targets",
+      "type": "function",
+      "name": "get_targets",
+      "summary": "为一个 batch 的所有样本计算匈牙利匹配后的分类与回归训练目标",
+      "tags": [
+        "训练",
+        "标签分配",
+        "匈牙利匹配"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/modules/__init__.py",
+      "type": "file",
+      "name": "modules/__init__.py",
+      "summary": "Transformer 模块入口,导出感知 Transformer、空间交叉注意力、时序自注意力、编码器与解码器",
+      "filePath": "projects/mmdet3d_plugin/bevformer/modules/__init__.py",
+      "tags": [
+        "模块导出",
+        "Transformer"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/modules/transformer.py",
+      "type": "file",
+      "name": "transformer.py",
+      "summary": "PerceptionTransformer 实现,整合编码器与解码器,融合 can_bus/相机/层级嵌入生成 BEV 特征",
+      "filePath": "projects/mmdet3d_plugin/bevformer/modules/transformer.py",
+      "tags": [
+        "Transformer",
+        "BEV特征",
+        "时序建模"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/modules/transformer.py:PerceptionTransformer",
+      "type": "class",
+      "name": "PerceptionTransformer",
+      "summary": "BEVFormer 核心 Transformer,持有 encoder 与 decoder,负责由多尺度图像特征与 BEV 查询生成 BEV 特征,并支持 can_bus 信号与历史 BEV 旋转对齐",
+      "tags": [
+        "Transformer",
+        "BEV特征",
+        "编码器",
+        "解码器",
+        "时序建模"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/modules/transformer.py:get_bev_features",
+      "type": "function",
+      "name": "get_bev_features",
+      "summary": "由多尺度图像特征、BEV 查询、位置编码与 prev_bev 经编码器生成当前帧 BEV 特征,融合 can_bus 与 shift 偏移",
+      "tags": [
+        "BEV特征",
+        "编码器",
+        "时序融合"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/modules/encoder.py",
+      "type": "file",
+      "name": "encoder.py",
+      "summary": "BEVFormer 编码器及编码层,生成 3D/2D 参考点、做点采样投影,串联时序自注意力与空间交叉注意力",
+      "filePath": "projects/mmdet3d_plugin/bevformer/modules/encoder.py",
+      "tags": [
+        "编码器",
+        "BEV特征",
+        "注意力机制",
+        "参考点"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/modules/encoder.py:BEVFormerEncoder",
+      "type": "class",
+      "name": "BEVFormerEncoder",
+      "summary": "BEV 编码器(TransformerLayerSequence),生成 pillar 内 3D 参考点与 BEV 平面 2D 参考点,并通过 lidar2img 投影做 point_sampling,逐层堆叠编码层",
+      "tags": [
+        "编码器",
+        "BEV特征",
+        "参考点",
+        "点采样"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/modules/encoder.py:BEVFormerLayer",
+      "type": "class",
+      "name": "BEVFormerLayer",
+      "summary": "单个 BEV 编码层,继承自定义基础 Transformer 层,组合时序自注意力(TSA)、空间交叉注意力(SCA)与前馈网络",
+      "tags": [
+        "编码器",
+        "注意力机制",
+        "Transformer层"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/modules/encoder.py:get_reference_points",
+      "type": "function",
+      "name": "get_reference_points",
+      "summary": "静态方法,生成空间交叉注意力用的 3D 参考点与时序自注意力用的 2D BEV 参考点",
+      "tags": [
+        "参考点",
+        "注意力机制"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/modules/encoder.py:point_sampling",
+      "type": "function",
+      "name": "point_sampling",
+      "summary": "强制 fp32,将 3D 参考点经 lidar2img 投影到各相机像素平面,生成相机参考点与可见性掩码,供 SCA 使用",
+      "tags": [
+        "点采样",
+        "投影",
+        "多相机"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py",
+      "type": "file",
+      "name": "spatial_cross_attention.py",
+      "summary": "空间交叉注意力模块,将 BEV 查询与多相机图像特征做 3D 可变形交叉注意力",
+      "filePath": "projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py",
+      "tags": [
+        "注意力机制",
+        "空间交叉注意力",
+        "可变形注意力",
+        "多相机"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py:SpatialCrossAttention",
+      "type": "class",
+      "name": "SpatialCrossAttention",
+      "summary": "空间交叉注意力(SCA),用相机参考点筛选有效 BEV 查询,调用内部可变形注意力聚合多相机图像特征,完成 2D 图像到 BEV 的空间融合",
+      "tags": [
+        "注意力机制",
+        "空间交叉注意力",
+        "多相机",
+        "BEV特征"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py:MSDeformableAttention3D",
+      "type": "class",
+      "name": "MSDeformableAttention3D",
+      "summary": "3D 多尺度可变形注意力,作为 SCA 的内部注意力,在多尺度图像特征上根据采样偏移与注意力权重做可变形采样",
+      "tags": [
+        "可变形注意力",
+        "多尺度",
+        "注意力机制"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/modules/temporal_self_attention.py",
+      "type": "file",
+      "name": "temporal_self_attention.py",
+      "summary": "时序自注意力模块,基于 Deformable DETR,在当前 BEV 与历史 BEV 队列上做可变形自注意力实现时序融合",
+      "filePath": "projects/mmdet3d_plugin/bevformer/modules/temporal_self_attention.py",
+      "tags": [
+        "注意力机制",
+        "时序自注意力",
+        "可变形注意力",
+        "时序建模"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/modules/temporal_self_attention.py:TemporalSelfAttention",
+      "type": "class",
+      "name": "TemporalSelfAttention",
+      "summary": "时序自注意力(TSA),在长度为 2 的 BEV 队列(当前帧+历史帧)上做可变形自注意力,实现跨时刻 BEV 特征对齐与融合",
+      "tags": [
+        "注意力机制",
+        "时序自注意力",
+        "时序建模",
+        "BEV特征"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/modules/decoder.py",
+      "type": "file",
+      "name": "decoder.py",
+      "summary": "检测解码器,逐层迭代细化参考点输出 query,并提供自定义多尺度可变形注意力与 inverse_sigmoid",
+      "filePath": "projects/mmdet3d_plugin/bevformer/modules/decoder.py",
+      "tags": [
+        "解码器",
+        "可变形注意力",
+        "3D检测",
+        "参考点细化"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/modules/decoder.py:DetectionTransformerDecoder",
+      "type": "class",
+      "name": "DetectionTransformerDecoder",
+      "summary": "DETR3D 风格检测解码器,在 BEV 特征上逐层做注意力并用回归分支迭代细化参考点,返回中间层输出",
+      "tags": [
+        "解码器",
+        "3D检测",
+        "参考点细化"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/modules/decoder.py:CustomMSDeformableAttention",
+      "type": "class",
+      "name": "CustomMSDeformableAttention",
+      "summary": "解码器中使用的自定义多尺度可变形注意力模块",
+      "tags": [
+        "可变形注意力",
+        "多尺度",
+        "注意力机制"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/modules/custom_base_transformer_layer.py",
+      "type": "file",
+      "name": "custom_base_transformer_layer.py",
+      "summary": "自定义基础 Transformer 层,灵活配置注意力、FFN 与归一化顺序,作为 BEVFormerLayer 的父类",
+      "filePath": "projects/mmdet3d_plugin/bevformer/modules/custom_base_transformer_layer.py",
+      "tags": [
+        "Transformer层",
+        "基础模块"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/modules/custom_base_transformer_layer.py:MyCustomBaseTransformerLayer",
+      "type": "class",
+      "name": "MyCustomBaseTransformerLayer",
+      "summary": "可配置的基础视觉 Transformer 层,支持自定义注意力/FFN/归一化算子序列,被 BEVFormerLayer 继承",
+      "tags": [
+        "Transformer层",
+        "基础模块"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/modules/multi_scale_deformable_attn_function.py",
+      "type": "file",
+      "name": "multi_scale_deformable_attn_function.py",
+      "summary": "多尺度可变形注意力的自定义 autograd Function,提供 fp16 与 fp32 前向/反向 CUDA 算子封装",
+      "filePath": "projects/mmdet3d_plugin/bevformer/modules/multi_scale_deformable_attn_function.py",
+      "tags": [
+        "可变形注意力",
+        "CUDA算子",
+        "autograd"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/modules/multi_scale_deformable_attn_function.py:MultiScaleDeformableAttnFunction_fp32",
+      "type": "class",
+      "name": "MultiScaleDeformableAttnFunction_fp32",
+      "summary": "fp32 多尺度可变形注意力 autograd Function,封装 CUDA 前向与反向",
+      "tags": [
+        "可变形注意力",
+        "CUDA算子",
+        "FP32"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/modules/multi_scale_deformable_attn_function.py:MultiScaleDeformableAttnFunction_fp16",
+      "type": "class",
+      "name": "MultiScaleDeformableAttnFunction_fp16",
+      "summary": "fp16 多尺度可变形注意力 autograd Function,封装半精度 CUDA 前向与反向",
+      "tags": [
+        "可变形注意力",
+        "CUDA算子",
+        "FP16"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/apis/__init__.py",
+      "type": "file",
+      "name": "apis/__init__.py",
+      "summary": "训练/测试 API 入口,导出 custom_train_model 与 custom_train_detector",
+      "filePath": "projects/mmdet3d_plugin/bevformer/apis/__init__.py",
+      "tags": [
+        "模块导出",
+        "训练接口"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/apis/train.py",
+      "type": "file",
+      "name": "train.py",
+      "summary": "训练启动封装,根据配置选择分割或检测训练流程,转发到 custom_train_detector",
+      "filePath": "projects/mmdet3d_plugin/bevformer/apis/train.py",
+      "tags": [
+        "训练接口",
+        "启动封装"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/apis/train.py:custom_train_model",
+      "type": "function",
+      "name": "custom_train_model",
+      "summary": "按配置分发训练流程,检测模型走 custom_train_detector,使用自定义 eval_hook",
+      "tags": [
+        "训练接口",
+        "启动封装"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/apis/mmdet_train.py",
+      "type": "file",
+      "name": "mmdet_train.py",
+      "summary": "自定义检测器训练实现,构建数据加载器、优化器、自定义视频 Runner 与评估钩子并启动训练循环",
+      "filePath": "projects/mmdet3d_plugin/bevformer/apis/mmdet_train.py",
+      "tags": [
+        "训练接口",
+        "Runner",
+        "数据加载"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/apis/mmdet_train.py:custom_train_detector",
+      "type": "function",
+      "name": "custom_train_detector",
+      "summary": "核心训练函数:构建数据加载器与优化器,注册自定义视频 Runner、优化器/学习率/评估钩子,执行训练",
+      "tags": [
+        "训练接口",
+        "Runner",
+        "钩子",
+        "数据加载"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/apis/test.py",
+      "type": "file",
+      "name": "test.py",
+      "summary": "多 GPU 分布式测试工具,执行推理并通过 CPU/GPU 收集与编码各进程结果",
+      "filePath": "projects/mmdet3d_plugin/bevformer/apis/test.py",
+      "tags": [
+        "测试",
+        "分布式",
+        "结果收集"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/bevformer/apis/test.py:custom_multi_gpu_test",
+      "type": "function",
+      "name": "custom_multi_gpu_test",
+      "summary": "多 GPU 分布式推理,遍历数据加载器收集预测结果并跨进程汇总",
+      "tags": [
+        "测试",
+        "分布式",
+        "推理"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/runner/__init__.py",
+      "type": "file",
+      "name": "runner/__init__.py",
+      "summary": "Runner 子模块入口,导出 EpochBasedRunner_video",
+      "filePath": "projects/mmdet3d_plugin/bevformer/runner/__init__.py",
+      "tags": [
+        "模块导出",
+        "Runner"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/runner/epoch_based_runner.py",
+      "type": "file",
+      "name": "epoch_based_runner.py",
+      "summary": "面向视频序列的按 epoch 训练 Runner,先无梯度推理历史帧 prev_bev,再用最后一帧训练",
+      "filePath": "projects/mmdet3d_plugin/bevformer/runner/epoch_based_runner.py",
+      "tags": [
+        "Runner",
+        "时序建模",
+        "训练循环"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/runner/epoch_based_runner.py:EpochBasedRunner_video",
+      "type": "class",
+      "name": "EpochBasedRunner_video",
+      "summary": "视频序列训练 Runner,继承 EpochBasedRunner,逐帧用 eval_model 推理 prev_bev,最后一帧反向传播训练,实现高效时序训练",
+      "tags": [
+        "Runner",
+        "时序建模",
+        "训练循环",
+        "BEV特征"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/hooks/__init__.py",
+      "type": "file",
+      "name": "hooks/__init__.py",
+      "summary": "钩子子模块入口,导出 TransferWeight",
+      "filePath": "projects/mmdet3d_plugin/bevformer/hooks/__init__.py",
+      "tags": [
+        "模块导出",
+        "钩子"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/bevformer/hooks/custom_hooks.py",
+      "type": "file",
+      "name": "custom_hooks.py",
+      "summary": "自定义训练钩子,将训练模型权重同步到评估模型",
+      "filePath": "projects/mmdet3d_plugin/bevformer/hooks/custom_hooks.py",
+      "tags": [
+        "钩子",
+        "权重同步"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/bevformer/hooks/custom_hooks.py:TransferWeight",
+      "type": "class",
+      "name": "TransferWeight",
+      "summary": "训练钩子,在指定迭代间隔把训练模型的权重加载到 eval_model,保证时序推理用最新权重",
+      "tags": [
+        "钩子",
+        "权重同步",
+        "时序建模"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:VADv2/VADv2_head.py",
+      "type": "file",
+      "name": "VADv2_head.py",
+      "summary": "VADv2 端到端自动驾驶的核心检测头模块。基于 mmdet3d 的 DETRHead,实现向量化场景表示下的多任务输出:3D目标检测、运动预测(motion)、向量地图构建(map)、以及基于离散轨迹锚点(plan_anchors)的概率式端到端规划。整合 BEV 特征、Transformer 解码器、交通灯/停车标志识别、以及多种规划评分损失(碰撞/边界/中心线/专家行为)。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "端到端规划",
+        "BEV特征",
+        "Transformer",
+        "3D检测",
+        "运动预测",
+        "向量地图",
+        "自动驾驶"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:VADv2/VADv2_head.py:MLP",
+      "type": "class",
+      "name": "MLP",
+      "summary": "基础多层感知机模块,由 Linear、LayerNorm、ReLU 组成,作为 LaneNet 的子图编码单元。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "MLP",
+        "网络组件"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:VADv2/VADv2_head.py:LaneNet",
+      "type": "class",
+      "name": "LaneNet",
+      "summary": "车道线向量特征提取网络,通过多层 MLP 子图与最大池化聚合,将向量化车道线点表示编码为实例级车道特征。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "车道线编码",
+        "向量地图",
+        "特征提取"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "type": "class",
+      "name": "v116ADTRHead",
+      "summary": "VADv2规划头(DETRHead子类),将v1的轨迹回归改为在预定义轨迹词表(如4096条)上分类输出概率分布,支持多模态与规则后处理。",
+      "tags": [
+        "VADv2",
+        "概率规划",
+        "轨迹词表",
+        "分类"
+      ],
+      "filePath": "VADv2/VADv2_head.py",
+      "complexity": "complex"
+    },
+    {
+      "id": "class:VADv2/VADv2_head.py:PlanningMetric",
+      "type": "class",
+      "name": "PlanningMetric",
+      "summary": "规划评测指标类,计算开环L2误差与碰撞率等nuScenes规划评估指标。",
+      "tags": [
+        "评测指标",
+        "L2误差",
+        "碰撞率"
+      ],
+      "filePath": "VADv2/VADv2_head.py",
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:_init_layers",
+      "type": "function",
+      "name": "_init_layers",
+      "summary": "初始化检测头的各分支:分类/回归分支、运动预测分支、地图分类/回归分支、自车查询预处理分支等。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "网络初始化",
+        "多任务分支"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:forward",
+      "type": "function",
+      "name": "forward",
+      "summary": "前向传播。从多层级图像特征生成 BEV 特征,经 Transformer 解码出目标检测、运动轨迹、向量地图,并基于轨迹锚点与自车交互编码完成端到端规划评分输出。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "前向传播",
+        "BEV特征",
+        "Transformer",
+        "端到端规划"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:loss",
+      "type": "function",
+      "name": "loss",
+      "summary": "汇总所有任务损失:逐层调用检测/运动损失、地图损失,以及规划、交通灯、停车标志损失,返回总损失字典。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "损失计算",
+        "多任务"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:loss_planning",
+      "type": "function",
+      "name": "loss_planning",
+      "summary": "自车规划损失。基于轨迹锚点构造碰撞、地图边界、中心线一致性、专家驾驶行为四类分类标签,计算规划评分损失。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "规划损失",
+        "碰撞",
+        "专家行为"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:loss_single",
+      "type": "function",
+      "name": "loss_single",
+      "summary": "单解码层的检测与运动预测损失计算,包含目标分类、3D框回归与多模态轨迹回归/分类损失。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "检测损失",
+        "运动预测损失"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:map_loss_single",
+      "type": "function",
+      "name": "map_loss_single",
+      "summary": "单解码层的向量地图损失计算,包含地图元素分类、点回归、方向损失等。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "地图损失",
+        "向量地图"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:get_bboxes",
+      "type": "function",
+      "name": "get_bboxes",
+      "summary": "推理阶段解码预测结果,将网络输出转换为最终的检测框、轨迹和规划结果。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "推理解码",
+        "后处理"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:get_plan_col_target",
+      "type": "function",
+      "name": "get_plan_col_target",
+      "summary": "基于 PlanningMetric 占据栅格,为每条候选规划轨迹生成是否与车辆/行人碰撞的分类标签。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "规划标签",
+        "碰撞检测"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:get_plan_bd_target",
+      "type": "function",
+      "name": "get_plan_bd_target",
+      "summary": "为候选规划轨迹生成是否越过地图边界(道路边界)的分类标签。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "规划标签",
+        "地图边界"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:get_plan_cl_target",
+      "type": "function",
+      "name": "get_plan_cl_target",
+      "summary": "为候选规划轨迹生成与车道中心线一致性的分类标签。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "规划标签",
+        "中心线"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:get_plan_expert_target",
+      "type": "function",
+      "name": "get_plan_expert_target",
+      "summary": "结合自车真值轨迹与碰撞/边界约束,为候选轨迹匹配专家驾驶行为标签及其权重。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "规划标签",
+        "专家行为",
+        "模仿学习"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:get_targets",
+      "type": "function",
+      "name": "get_targets",
+      "summary": "为检测任务进行批量的预测-真值匹配与目标分配。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "目标分配",
+        "检测"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:map_get_targets",
+      "type": "function",
+      "name": "map_get_targets",
+      "summary": "为向量地图任务进行批量的预测-真值匹配与目标分配。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "目标分配",
+        "向量地图"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:select_and_pad_query",
+      "type": "function",
+      "name": "select_and_pad_query",
+      "summary": "按检测得分阈值筛选代理(agent)查询并填充对齐,供自车与代理交互建模使用。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "交互建模",
+        "查询筛选"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:select_and_pad_pred_map",
+      "type": "function",
+      "name": "select_and_pad_pred_map",
+      "summary": "按地图元素得分阈值筛选地图查询并填充对齐,供自车与地图交互建模使用。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "交互建模",
+        "地图筛选"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:evaluate_coll",
+      "type": "function",
+      "name": "evaluate_coll",
+      "summary": "PlanningMetric 的核心碰撞评估,判断自车轨迹各时刻是否与占据栅格发生碰撞。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "碰撞检测",
+        "规划评估"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:VADv2/VADv2_head.py:get_label",
+      "type": "function",
+      "name": "get_label",
+      "summary": "PlanningMetric 中由代理框与特征生成 BEV 车辆/行人占据分割标签。",
+      "filePath": "VADv2/VADv2_head.py",
+      "tags": [
+        "BEV占据栅格",
+        "分割标签"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py",
+      "type": "file",
+      "name": "hungarian_assigner_3d.py",
+      "summary": "3D检测框的匈牙利匹配分配器,基于加权代价(分类+回归L1)在预测与真值间做一对一匹配。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py",
+      "tags": [
+        "匈牙利匹配",
+        "标签分配",
+        "3D检测",
+        "代价计算"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py:HungarianAssigner3D",
+      "type": "class",
+      "name": "HungarianAssigner3D",
+      "summary": "计算预测与真值之间的一对一匈牙利匹配,加权融合分类代价与回归L1代价,未匹配项视为背景。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py",
+      "tags": [
+        "匈牙利匹配",
+        "标签分配",
+        "3D检测"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py:assign",
+      "type": "function",
+      "name": "assign",
+      "summary": "执行一对一匹配:计算分类与回归代价,在CPU上用linear_sum_assignment求解,输出AssignResult。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py",
+      "tags": [
+        "匈牙利匹配",
+        "标签分配"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py",
+      "type": "file",
+      "name": "map_hungarian_assigner_3d.py",
+      "summary": "地图矢量元素的匈牙利匹配分配器,在分类、回归、IoU代价基础上加入Chamfer点序列代价并选最优排列顺序。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py",
+      "tags": [
+        "匈牙利匹配",
+        "地图矢量",
+        "Chamfer距离",
+        "标签分配"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py:MapHungarianAssigner3D",
+      "type": "class",
+      "name": "MapHungarianAssigner3D",
+      "summary": "地图矢量线的一对一匹配分配器,融合分类/回归/IoU/点序列Chamfer代价,并返回每个匹配的最优点序排列索引。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py",
+      "tags": [
+        "匈牙利匹配",
+        "地图矢量",
+        "Chamfer距离"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py:assign",
+      "type": "function",
+      "name": "assign",
+      "summary": "对地图矢量线做�w一对一匹配:对点序列插值对齐后计算Chamfer代价并取最优排列,综合多项代价求解匈牙利匹配。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py",
+      "tags": [
+        "匈牙利匹配",
+        "地图矢量",
+        "Chamfer距离"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/core/bbox/assigners/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "summary": "分配器模块导出,暴露HungarianAssigner3D与MapHungarianAssigner3D。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/assigners/__init__.py",
+      "tags": [
+        "模块导出",
+        "标签分配"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/core/bbox/coders/nms_free_coder.py",
+      "type": "file",
+      "name": "nms_free_coder.py",
+      "summary": "NMS-free检测框解码器,对分类分数取topk并反归一化box,无需NMS后处理。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/coders/nms_free_coder.py",
+      "tags": [
+        "框解码",
+        "NMS-free",
+        "3D检测"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/core/bbox/coders/nms_free_coder.py:NMSFreeCoder",
+      "type": "class",
+      "name": "NMSFreeCoder",
+      "summary": "NMS-free框编解码器,decode时按分类分数topk选框并反归一化,按点云范围过滤中心点。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/coders/nms_free_coder.py",
+      "tags": [
+        "框解码",
+        "NMS-free"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/core/bbox/coders/fut_nms_free_coder.py",
+      "type": "file",
+      "name": "fut_nms_free_coder.py",
+      "summary": "带未来轨迹的NMS-free解码器,在检测框解码基础上同步输出每个目标的预测轨迹trajs。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/coders/fut_nms_free_coder.py",
+      "tags": [
+        "框解码",
+        "NMS-free",
+        "轨迹预测"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/core/bbox/coders/fut_nms_free_coder.py:CustomNMSFreeCoder",
+      "type": "class",
+      "name": "CustomNMSFreeCoder",
+      "summary": "VAD自定义NMS-free解码器,解码检测框的同时输出对应的未来运动轨迹预测。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/coders/fut_nms_free_coder.py",
+      "tags": [
+        "框解码",
+        "NMS-free",
+        "轨迹预测"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/core/bbox/coders/map_nms_free_coder.py",
+      "type": "file",
+      "name": "map_nms_free_coder.py",
+      "summary": "地图矢量元素的NMS-free解码器,topk选取后反归一化输出map_bboxes与map_pts点序列。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/coders/map_nms_free_coder.py",
+      "tags": [
+        "框解码",
+        "NMS-free",
+        "地图矢量"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/core/bbox/coders/map_nms_free_coder.py:MapNMSFreeCoder",
+      "type": "class",
+      "name": "MapNMSFreeCoder",
+      "summary": "地图矢量解码器,按分类分数topk选取并反归一化box与点序列,输出地图元素预测结果。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/coders/map_nms_free_coder.py",
+      "tags": [
+        "框解码",
+        "NMS-free",
+        "地图矢量"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/core/bbox/coders/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "summary": "解码器模块导出,暴露NMSFreeCoder、CustomNMSFreeCoder、MapNMSFreeCoder。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/coders/__init__.py",
+      "tags": [
+        "模块导出",
+        "框解码"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/core/bbox/match_costs/match_cost.py",
+      "type": "file",
+      "name": "match_cost.py",
+      "summary": "�hboxxx匹配代价定义,提供BBox3DL1Cost用cdist计算预测框与真值框的L1距离代价。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/match_costs/match_cost.py",
+      "tags": [
+        "代价计算",
+        "匈牙利匹配",
+        "L1距离"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/core/bbox/match_costs/match_cost.py:BBox3DL1Cost",
+      "type": "class",
+      "name": "BBox3DL1Cost",
+      "summary": "3D框L1代价,使用torch.cdist计算预测框与真值框的L1距离并乘以权重。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/match_costs/match_cost.py",
+      "tags": [
+        "代价计算",
+        "L1距离"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/core/bbox/util.py",
+      "type": "file",
+      "name": "util.py",
+      "summary": "边界框归一化工具,提供normalize_bbox与denormalize_bbox在(cx,cy,w,l,cz,h,sin,cos,vx,vy)表示间转换。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/util.py",
+      "tags": [
+        "框归一化",
+        "工具函数",
+        "3D检测"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/core/bbox/util.py:normalize_bbox",
+      "type": "function",
+      "name": "normalize_bbox",
+      "summary": "将3D框归一化,对尺寸取log、旋转角拆分为sin/cos,拼接为网络回归目标格式。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/util.py",
+      "tags": [
+        "框归一化",
+        "工具函数"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/core/bbox/util.py:denormalize_bbox",
+      "type": "function",
+      "name": "denormalize_bbox",
+      "summary": "将归一化框还原为物理框,对尺寸取exp、由sin/cos还原旋转角,拼接为(cx,cy,cz,w,l,h,rot,vx,vy)。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/util.py",
+      "tags": [
+        "框反归一化",
+        "工具函数"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/core/bbox/structures/lidar_box3d.py",
+      "type": "file",
+      "name": "lidar_box3d.py",
+      "summary": "LiDAR坐标系下带未来轨迹的自定义3D框结构,提供角点、BEV、旋转、翻转等几何操作。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/structures/lidar_box3d.py",
+      "tags": [
+        "3D框结构",
+        "LiDAR坐标",
+        "BEV",
+        "几何变换"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/core/bbox/structures/lidar_box3d.py:CustomLiDARInstance3DBoxes",
+      "type": "class",
+      "name": "CustomLiDARInstance3DBoxes",
+      "summary": "扩展mmdet3d的LiDAR 3D框,附带fut_trajs未来轨迹与有效mask,支持重心、角点、BEV、旋转、翻转。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/structures/lidar_box3d.py",
+      "tags": [
+        "3D框结构",
+        "LiDAR坐标",
+        "轨迹"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/core/bbox/structures/nuscenes_box.py",
+      "type": "file",
+      "name": "nuscenes_box.py",
+      "summary": "自定义nuScenes 3D框数据类,附带未来轨迹,支持平移旋转、角点计算与可视化渲染。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/structures/nuscenes_box.py",
+      "tags": [
+        "3D框结构",
+        "nuScenes",
+        "可视化",
+        "轨迹"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/core/bbox/structures/nuscenes_box.py:CustomNuscenesBox",
+      "type": "class",
+      "name": "CustomNuscenesBox",
+      "summary": "带label/score/velocity与未来轨迹的nuScenes 3D框,支持平移旋转、角点计算、box与轨迹渲染。",
+      "filePath": "projects/mmdet3d_plugin/core/bbox/structures/nuscenes_box.py",
+      "tags": [
+        "3D框结构",
+        "nuScenes",
+        "可视化"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/core/evaluation/metric_motion.py",
+      "type": "file",
+      "name": "metric_motion.py",
+      "summary": "运动轨迹评估指标,提供ADE平均位移误差、FDE最终位移误差及多模态best预测选取。",
+      "filePath": "projects/mmdet3d_plugin/core/evaluation/metric_motion.py",
+      "tags": [
+        "评估指标",
+        "轨迹预测",
+        "ADE",
+        "FDE"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/core/evaluation/metric_motion.py:get_ade",
+      "type": "function",
+      "name": "get_ade",
+      "summary": "计算预测轨迹与真值轨迹的平均位移误差ADE。",
+      "filePath": "projects/mmdet3d_plugin/core/evaluation/metric_motion.py",
+      "tags": [
+        "评估指标",
+        "ADE"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/core/evaluation/metric_motion.py:get_fde",
+      "type": "function",
+      "name": "get_fde",
+      "summary": "计算预测轨迹与真值轨迹终点的最终位移误差FDE。",
+      "filePath": "projects/mmdet3d_plugin/core/evaluation/metric_motion.py",
+      "tags": [
+        "评估指标",
+        "FDE"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/core/evaluation/metric_motion.py:get_best_preds",
+      "type": "function",
+      "name": "get_best_preds",
+      "summary": "从多模态预测轨迹中按终点距离选取与真值最接近的最优模态轨迹。",
+      "filePath": "projects/mmdet3d_plugin/core/evaluation/metric_motion.py",
+      "tags": [
+        "评估指标",
+        "多模态",
+        "轨迹预测"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/core/evaluation/eval_hooks.py",
+      "type": "file",
+      "name": "eval_hooks.py",
+      "summary": "自定义分布式评估Hook,支持动态评估间隔,在训练中调用custom_multi_gpu_test执行评估与最优权重保存。",
+      "filePath": "projects/mmdet3d_plugin/core/evaluation/eval_hooks.py",
+      "tags": [
+        "评估Hook",
+        "分布式",
+        "训练流程"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/core/evaluation/eval_hooks.py:CustomDistEvalHook",
+      "type": "class",
+      "name": "CustomDistEvalHook",
+      "summary": "继承BaseDistEvalHook的分布式评估钩子,支持动态评估间隔并广播BN缓冲、调用多卡测试评估。",
+      "filePath": "projects/mmdet3d_plugin/core/evaluation/eval_hooks.py",
+      "tags": [
+        "评估Hook",
+        "分布式"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/core/evaluation/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "summary": "评估模块导出,暴露CustomDistEvalHook。",
+      "filePath": "projects/mmdet3d_plugin/core/evaluation/__init__.py",
+      "tags": [
+        "模块导出",
+        "评估"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py",
+      "type": "file",
+      "name": "nuscenes_vad_dataset.py",
+      "summary": "VAD的nuScenes数据集主类与地图矢量线结构,加载图像/3D标注/地图矢量/自车历史与未来轨迹/导航指令,并实现端到端评估。",
+      "filePath": "projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py",
+      "tags": [
+        "数据加载",
+        "nuScenes",
+        "地图矢量",
+        "规划",
+        "评估"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py:VADCustomNuScenesDataset",
+      "type": "class",
+      "name": "VADCustomNuScenesDataset",
+      "summary": "VAD的nuScenes数据集类,准备多视角图像、3D检测/运动/地图矢量真值与自车规划标注,并组织检测/地图/规划评估。",
+      "filePath": "projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py",
+      "tags": [
+        "数据加载",
+        "nuScenes",
+        "规划",
+        "评估"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py:LiDARInstanceLines",
+      "type": "class",
+      "name": "LiDARInstanceLines",
+      "summary": "LiDAR坐标下的地图矢量线实例容器,提供定长采样、起止点、bbox及多种点序排列的张量表示。",
+      "filePath": "projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py",
+      "tags": [
+        "地图矢量",
+        "数据结构",
+        "定长采样"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/datasets/vad_custom_nuscenes_eval.py",
+      "type": "file",
+      "name": "vad_custom_nuscenes_eval.py",
+      "summary": "VAD自定义nuScenes评估,扩展DetectionBox增加token/visibility/index,并实现检测评估流程与PR/TP曲线绘制。",
+      "filePath": "projects/mmdet3d_plugin/datasets/vad_custom_nuscenes_eval.py",
+      "tags": [
+        "评估",
+        "nuScenes",
+        "检测指标",
+        "PR曲线"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/datasets/vad_custom_nuscenes_eval.py:DetectionBox_modified",
+      "type": "class",
+      "name": "DetectionBox_modified",
+      "summary": "扩展nuScenes DetectionBox,增加annotation token、visibility与index字段及其序列化。",
+      "filePath": "projects/mmdet3d_plugin/datasets/vad_custom_nuscenes_eval.py",
+      "tags": [
+        "评估",
+        "nuScenes",
+        "数据结构"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/datasets/nuscenes_eval.py",
+      "type": "file",
+      "name": "nuscenes_eval.py",
+      "summary": "nuScenes检测评估模块(含filter_eval_boxes),扩展DetectionBox并绘制TP曲线,与vad_custom_nuscenes_eval功能相近。",
+      "filePath": "projects/mmdet3d_plugin/datasets/nuscenes_eval.py",
+      "tags": [
+        "评估",
+        "nuScenes",
+        "检测指标"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/datasets/pipelines/loading.py",
+      "type": "file",
+      "name": "loading.py",
+      "summary": "数据加载管线,自定义从文件/多扫描加载点云,支持虚拟点云增强与LiDAR线束缩减。",
+      "filePath": "projects/mmdet3d_plugin/datasets/pipelines/loading.py",
+      "tags": [
+        "数据加载",
+        "点云",
+        "数据管线"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/datasets/pipelines/loading.py:CustomLoadPointsFromMultiSweeps",
+      "type": "class",
+      "name": "CustomLoadPointsFromMultiSweeps",
+      "summary": "从多帧扫描加载并融合点云的管线,支持移除近点、线束缩减与增强点云加载。",
+      "filePath": "projects/mmdet3d_plugin/datasets/pipelines/loading.py",
+      "tags": [
+        "数据加载",
+        "点云",
+        "多帧融合"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/datasets/pipelines/formating.py",
+      "type": "file",
+      "name": "formating.py",
+      "summary": "数据格式化管线,在标准3D格式化基础上将自车历史/未来轨迹/mask/指令/特征封装为DataContainer。",
+      "filePath": "projects/mmdet3d_plugin/datasets/pipelines/formating.py",
+      "tags": [
+        "数据格式化",
+        "数据管线",
+        "规划"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/datasets/pipelines/formating.py:CustomDefaultFormatBundle3D",
+      "type": "class",
+      "name": "CustomDefaultFormatBundle3D",
+      "summary": "自定义默认3D格式化bundle,额外将自车轨迹/mask/导航指令/lcf特征及属性标签打包为DataContainer。",
+      "filePath": "projects/mmdet3d_plugin/datasets/pipelines/formating.py",
+      "tags": [
+        "数据格式化",
+        "规划"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/datasets/pipelines/transform_3d.py",
+      "type": "file",
+      "name": "transform_3d.py",
+      "summary": "3D数据变换管线集合,含目标范围/类别过滤、多视角图像填充、归一化、光度畸变、随机缩放与CustomCollect3D。",
+      "filePath": "projects/mmdet3d_plugin/datasets/pipelines/transform_3d.py",
+      "tags": [
+        "数据增强",
+        "数据管线",
+        "图像变换"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/datasets/pipelines/transform_3d.py:CustomObjectRangeFilter",
+      "type": "class",
+      "name": "CustomObjectRangeFilter",
+      "summary": "按点云范围过滤3D目标,同时过滤对应的未来轨迹属性标签并限制yaw范围。",
+      "filePath": "projects/mmdet3d_plugin/datasets/pipelines/transform_3d.py",
+      "tags": [
+        "数据过滤",
+        "数据增强"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/datasets/pipelines/transform_3d.py:NormalizeMultiviewImage",
+      "type": "class",
+      "name": "NormalizeMultiviewImage",
+      "summary": "对多视角图像逐张做均值方差归一化并记录img_norm_cfg。",
+      "filePath": "projects/mmdet3d_plugin/datasets/pipelines/transform_3d.py",
+      "tags": [
+        "图像变换",
+        "归一化"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/datasets/pipelines/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "summary": "数据管线模块导出,集中暴露变换/格式化/加载相关的管线类。",
+      "filePath": "projects/mmdet3d_plugin/datasets/pipelines/__init__.py",
+      "tags": [
+        "模块导出",
+        "数据管线"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/datasets/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "summary": "数据集模块导出,暴露VADCustomNuScenesDataset。",
+      "filePath": "projects/mmdet3d_plugin/datasets/__init__.py",
+      "tags": [
+        "模块导出",
+        "数据集"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/datasets/builder.py",
+      "type": "file",
+      "name": "builder.py",
+      "summary": "数据集与DataLoader构建器,按分布式/采样策略选择sampler并构建DataLoader,提供custom_build_dataset封装。",
+      "filePath": "projects/mmdet3d_plugin/datasets/builder.py",
+      "tags": [
+        "数据加载",
+        "DataLoader",
+        "采样器",
+        "构建器"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/datasets/builder.py:build_dataloader",
+      "type": "function",
+      "name": "build_dataloader",
+      "summary": "构建PyTorch DataLoader,分布式时按是否shuffle选择DistributedGroupSampler或DistributedSampler。",
+      "filePath": "projects/mmdet3d_plugin/datasets/builder.py",
+      "tags": [
+        "DataLoader",
+        "采样器",
+        "分布式"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/datasets/builder.py:custom_build_dataset",
+      "type": "function",
+      "name": "custom_build_dataset",
+      "summary": "按配置构建数据集,支持Concat/Repeat/ClassBalanced/CBGS等包装数据集。",
+      "filePath": "projects/mmdet3d_plugin/datasets/builder.py",
+      "tags": [
+        "数据集",
+        "构建器"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py",
+      "type": "file",
+      "name": "mean_ap.py",
+      "summary": "地图矢量元素的mAP评估,按类格式化预测与真值点序列,计算tp/fp、recall/precision并求平均精度。",
+      "filePath": "projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py",
+      "tags": [
+        "评估指标",
+        "mAP",
+        "地图矢量"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py:eval_map",
+      "type": "function",
+      "name": "eval_map",
+      "summary": "按类多进程计算tp/fp,累加得到recall/precision并求每类AP与mAP,打印汇总表。",
+      "filePath": "projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py",
+      "tags": [
+        "评估指标",
+        "mAP"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py:average_precision",
+      "type": "function",
+      "name": "average_precision",
+      "summary": "由recall/precision曲线计算平均精度,支持area与11points两种模式。",
+      "filePath": "projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py",
+      "tags": [
+        "评估指标",
+        "AP"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/datasets/map_utils/tpfp.py",
+      "type": "file",
+      "name": "tpfp.py",
+      "summary": "地图矢量评估的TP/FP判定,基于向量IoU、凸IoU、旋转框IoU或Chamfer折线分数匹配预测与真值。",
+      "filePath": "projects/mmdet3d_plugin/datasets/map_utils/tpfp.py",
+      "tags": [
+        "评估指标",
+        "TP/FP",
+        "地图矢量",
+        "Chamfer距离"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/datasets/map_utils/tpfp.py:custom_tpfp_gen",
+      "type": "function",
+      "name": "custom_tpfp_gen",
+      "summary": "基于Chamfer折线分数判定地图矢量线预测的TP/FP,按分数降序贪心匹配未覆盖真值。",
+      "filePath": "projects/mmdet3d_plugin/datasets/map_utils/tpfp.py",
+      "tags": [
+        "评估指标",
+        "TP/FP",
+        "Chamfer距离"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/datasets/map_utils/tpfp.py:tpfp_gen",
+      "type": "function",
+      "name": "tpfp_gen",
+      "summary": "基于polyline_score判定地图矢量线预测的TP/FP,按分数降序贪心匹配。",
+      "filePath": "projects/mmdet3d_plugin/datasets/map_utils/tpfp.py",
+      "tags": [
+        "评估指标",
+        "TP/FP",
+        "地图矢量"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/datasets/samplers/sampler.py",
+      "type": "file",
+      "name": "sampler.py",
+      "summary": "采样器注册表,定义SAMPLER Registry与build_sampler构建函数。",
+      "filePath": "projects/mmdet3d_plugin/datasets/samplers/sampler.py",
+      "tags": [
+        "采样器",
+        "注册表",
+        "构建器"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/datasets/samplers/distributed_sampler.py",
+      "type": "file",
+      "name": "distributed_sampler.py",
+      "summary": "自定义分布式采样器,非shuffle模式下按副本均匀连续切分索引,保证各GPU样本划分确定。",
+      "filePath": "projects/mmdet3d_plugin/datasets/samplers/distributed_sampler.py",
+      "tags": [
+        "采样器",
+        "分布式"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/datasets/samplers/distributed_sampler.py:DistributedSampler",
+      "type": "class",
+      "name": "DistributedSampler",
+      "summary": "继承PyTorch DistributedSampler,非shuffle下按连续区段为各rank分配样本索引。",
+      "filePath": "projects/mmdet3d_plugin/datasets/samplers/distributed_sampler.py",
+      "tags": [
+        "采样器",
+        "分布式"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/models/backbones/__init__.py",
+      "type": "file",
+      "name": "backbones/__init__.py",
+      "summary": "骨干网络模块导出文件,对外暴露 VoVNet 类。",
+      "filePath": "projects/mmdet3d_plugin/models/backbones/__init__.py",
+      "tags": [
+        "骨干网络",
+        "模块导出"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "type": "file",
+      "name": "vovnet.py",
+      "summary": "VoVNet 骨干网络实现,提供多种规模(V-19 至 V-99)的 OSA(One-Shot Aggregation)特征提取主干,用于图像特征编码。",
+      "filePath": "projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "tags": [
+        "骨干网络",
+        "图像特征",
+        "OSA",
+        "卷积网络"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/models/hooks/__init__.py",
+      "type": "file",
+      "name": "hooks/__init__.py",
+      "summary": "训练钩子模块导出文件,暴露 GradChecker 钩子。",
+      "filePath": "projects/mmdet3d_plugin/models/hooks/__init__.py",
+      "tags": [
+        "训练钩子",
+        "模块导出"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/models/hooks/hooks.py",
+      "type": "file",
+      "name": "hooks.py",
+      "summary": "训练钩子实现,GradChecker 在每次训练迭代后检查未被使用的可训练参数并发出警告。",
+      "filePath": "projects/mmdet3d_plugin/models/hooks/hooks.py",
+      "tags": [
+        "训练钩子",
+        "梯度检查",
+        "调试"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/models/opt/__init__.py",
+      "type": "file",
+      "name": "opt/__init__.py",
+      "summary": "优化器模块导出文件,暴露 AdamW2 优化器。",
+      "filePath": "projects/mmdet3d_plugin/models/opt/__init__.py",
+      "tags": [
+        "优化器",
+        "模块导出"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/models/opt/adamw.py",
+      "type": "file",
+      "name": "adamw.py",
+      "summary": "自定义 AdamW2 优化器,修复 torch 1.8 中 AdamW 的 bug,注册到 mmcv 优化器构建器。",
+      "filePath": "projects/mmdet3d_plugin/models/opt/adamw.py",
+      "tags": [
+        "优化器",
+        "AdamW",
+        "训练"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/models/utils/__init__.py",
+      "type": "file",
+      "name": "utils/__init__.py",
+      "summary": "模型工具模块导出文件,汇总 run_time、GridMask、RelPositionEmbedding、save_tensor、PatchEmbed 等工具。",
+      "filePath": "projects/mmdet3d_plugin/models/utils/__init__.py",
+      "tags": [
+        "工具集",
+        "模块导出"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/models/utils/bricks.py",
+      "type": "file",
+      "name": "bricks.py",
+      "summary": "提供 run_time 计时装饰器,统计函数平均运行耗时,用于性能分析。",
+      "filePath": "projects/mmdet3d_plugin/models/utils/bricks.py",
+      "tags": [
+        "性能分析",
+        "计时器",
+        "装饰器"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/models/utils/embed.py",
+      "type": "file",
+      "name": "embed.py",
+      "summary": "PatchEmbed 图像分块嵌入实现,使用卷积层将图像切分为 patch 并投影到嵌入维度。",
+      "filePath": "projects/mmdet3d_plugin/models/utils/embed.py",
+      "tags": [
+        "分块嵌入",
+        "Transformer",
+        "卷积"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/models/utils/grid_mask.py",
+      "type": "file",
+      "name": "grid_mask.py",
+      "summary": "GridMask 数据增强实现,在图像上生成网格状遮罩以增强训练鲁棒性。",
+      "filePath": "projects/mmdet3d_plugin/models/utils/grid_mask.py",
+      "tags": [
+        "数据增强",
+        "GridMask",
+        "图像遮罩"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/models/utils/position_embedding.py",
+      "type": "file",
+      "name": "position_embedding.py",
+      "summary": "位置编码实现,包含基于正余弦的相对位置编码 RelPositionEmbedding 和频率编码 SineEmbedding。",
+      "filePath": "projects/mmdet3d_plugin/models/utils/position_embedding.py",
+      "tags": [
+        "位置编码",
+        "Transformer",
+        "正余弦"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/models/utils/visual.py",
+      "type": "file",
+      "name": "visual.py",
+      "summary": "可视化工具,提供 save_tensor 将张量保存为带伪彩色的图像,便于调试特征图。",
+      "filePath": "projects/mmdet3d_plugin/models/utils/visual.py",
+      "tags": [
+        "可视化",
+        "调试",
+        "特征图"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:VoVNet",
+      "type": "class",
+      "name": "VoVNet",
+      "summary": "VoVNet 主干网络主类,注册为 mmdet BACKBONES,由 stem 与 4 个 OSA stage 构成,支持冻结指定 stage、norm_eval 模式及多 stage 特征输出。",
+      "filePath": "projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "tags": [
+        "骨干网络",
+        "图像特征",
+        "OSA"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:_OSA_module",
+      "type": "class",
+      "name": "_OSA_module",
+      "summary": "OSA(One-Shot Aggregation)基本模块,将多层卷积输出一次性拼接聚合,并接 eSE 注意力,可选残差连接。",
+      "filePath": "projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "tags": [
+        "OSA",
+        "特征聚合",
+        "卷积"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:_OSA_stage",
+      "type": "class",
+      "name": "_OSA_stage",
+      "summary": "OSA stage,由若干 _OSA_module 顺序堆叠组成,首个 module 前可含最大池化下采样。",
+      "filePath": "projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "tags": [
+        "OSA",
+        "网络阶段",
+        "下采样"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:eSEModule",
+      "type": "class",
+      "name": "eSEModule",
+      "summary": "effective Squeeze-and-Excitation 通道注意力模块,通过全局池化与 Hsigmoid 生成通道权重。",
+      "filePath": "projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "tags": [
+        "注意力机制",
+        "通道注意力",
+        "SE"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:Hsigmoid",
+      "type": "class",
+      "name": "Hsigmoid",
+      "summary": "硬 Sigmoid 激活函数,使用 relu6((x+3)/6) 近似,供 eSE 模块使用。",
+      "filePath": "projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "tags": [
+        "激活函数"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/models/hooks/hooks.py:GradChecker",
+      "type": "class",
+      "name": "GradChecker",
+      "summary": "梯度检查钩子,继承 mmcv Hook,在训练迭代后检测梯度为空但需要梯度的参数并打印警告。",
+      "filePath": "projects/mmdet3d_plugin/models/hooks/hooks.py",
+      "tags": [
+        "训练钩子",
+        "梯度检查",
+        "调试"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/models/opt/adamw.py:AdamW2",
+      "type": "class",
+      "name": "AdamW2",
+      "summary": "自定义 AdamW 优化器,继承 torch Optimizer,修复 torch 1.8 的 beta 参数 bug,注册为 mmcv OPTIMIZERS。",
+      "filePath": "projects/mmdet3d_plugin/models/opt/adamw.py",
+      "tags": [
+        "优化器",
+        "AdamW",
+        "训练"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/models/utils/embed.py:PatchEmbed",
+      "type": "class",
+      "name": "PatchEmbed",
+      "summary": "图像分块嵌入模块,继承 mmcv BaseModule,用卷积实现 patch 投影,支持填充到 patch 整数倍及可选归一化。",
+      "filePath": "projects/mmdet3d_plugin/models/utils/embed.py",
+      "tags": [
+        "分块嵌入",
+        "Transformer",
+        "卷积"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/models/utils/grid_mask.py:GridMask",
+      "type": "class",
+      "name": "GridMask",
+      "summary": "GridMask 数据增强 nn.Module,前向时按概率生成旋转网格遮罩并作用于输入图像,支持 fp16 与按 epoch 调整概率。",
+      "filePath": "projects/mmdet3d_plugin/models/utils/grid_mask.py",
+      "tags": [
+        "数据增强",
+        "GridMask",
+        "图像遮罩"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/models/utils/grid_mask.py:Grid",
+      "type": "class",
+      "name": "Grid",
+      "summary": "GridMask 的基础实现类,以 (img,label) 为输入按概率生成网格遮罩,可附加偏移。",
+      "filePath": "projects/mmdet3d_plugin/models/utils/grid_mask.py",
+      "tags": [
+        "数据增强",
+        "GridMask"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/models/utils/position_embedding.py:RelPositionEmbedding",
+      "type": "class",
+      "name": "RelPositionEmbedding",
+      "summary": "相对位置编码模块,对特征图 H/W 坐标做正余弦变换后经线性层投影,可选 LayerNorm。",
+      "filePath": "projects/mmdet3d_plugin/models/utils/position_embedding.py",
+      "tags": [
+        "位置编码",
+        "正余弦",
+        "Transformer"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/models/utils/position_embedding.py:SineEmbedding",
+      "type": "class",
+      "name": "SineEmbedding",
+      "summary": "频率位置编码模块,将输入映射为多频率的 sin/cos 组合(NeRF 风格频率编码)。",
+      "filePath": "projects/mmdet3d_plugin/models/utils/position_embedding.py",
+      "tags": [
+        "位置编码",
+        "频率编码"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/models/utils/bricks.py:run_time",
+      "type": "function",
+      "name": "run_time",
+      "summary": "计时装饰器工厂,包装函数统计 CUDA 同步后的平均执行耗时并打印。",
+      "filePath": "projects/mmdet3d_plugin/models/utils/bricks.py",
+      "tags": [
+        "性能分析",
+        "计时器",
+        "装饰器"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/models/utils/visual.py:save_tensor",
+      "type": "function",
+      "name": "save_tensor",
+      "summary": "将张量整理为网格图像并保存,随后转换为 viridis 伪彩色,用于特征可视化。",
+      "filePath": "projects/mmdet3d_plugin/models/utils/visual.py",
+      "tags": [
+        "可视化",
+        "特征图"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/models/utils/visual.py:convert_color",
+      "type": "function",
+      "name": "convert_color",
+      "summary": "读取灰度图并以 viridis 色彩映射重新保存,实现伪彩色化。",
+      "filePath": "projects/mmdet3d_plugin/models/utils/visual.py",
+      "tags": [
+        "可视化",
+        "伪彩色"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/models/backbones/vovnet.py:conv3x3",
+      "type": "function",
+      "name": "conv3x3",
+      "summary": "构建 3x3 卷积+BN+ReLU 层序列的工厂函数。",
+      "filePath": "projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "tags": [
+        "卷积",
+        "构建块"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/models/backbones/vovnet.py:conv1x1",
+      "type": "function",
+      "name": "conv1x1",
+      "summary": "构建 1x1 卷积+BN+ReLU 层序列的工厂函数。",
+      "filePath": "projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "tags": [
+        "卷积",
+        "构建块"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/models/backbones/vovnet.py:dw_conv3x3",
+      "type": "function",
+      "name": "dw_conv3x3",
+      "summary": "构建深度可分离 3x3 卷积层序列(dw+pw+BN+ReLU)的工厂函数。",
+      "filePath": "projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "tags": [
+        "卷积",
+        "深度可分离",
+        "构建块"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:requirements.txt",
+      "type": "config",
+      "name": "requirements.txt",
+      "summary": "Conda/pip 依赖清单(linux-64),固定 VAD 运行环境的全部包版本,包含 PyTorch、mmcv、mmdet、numpy、carla 等关键依赖,用于复现训练与推理环境。",
+      "filePath": "requirements.txt",
+      "tags": [
+        "依赖管理",
+        "环境配置",
+        "mmcv",
+        "PyTorch"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:projects/configs/_base_/default_runtime.py",
+      "type": "config",
+      "name": "default_runtime.py",
+      "summary": "基础运行时配置:定义 checkpoint 保存间隔、日志钩子(TextLogger/TensorboardLogger)、分布式 nccl 后端、日志级别及默认训练 workflow,被所有 VAD 配置作为 _base_ 继承。",
+      "filePath": "projects/configs/_base_/default_runtime.py",
+      "tags": [
+        "运行时配置",
+        "日志",
+        "分布式训练",
+        "基础配置"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:projects/configs/datasets/custom_nus-3d.py",
+      "type": "config",
+      "name": "custom_nus-3d.py",
+      "summary": "自定义 nuScenes 3D 数据集基础配置,使用 NuScenesDataset_eval_modified 类型,定义点云范围、10 类检测类别、LiDAR 输入模态及训练/测试/评估 pipeline,被 VAD 各配置继承。",
+      "filePath": "projects/configs/datasets/custom_nus-3d.py",
+      "tags": [
+        "数据集配置",
+        "nuScenes",
+        "数据加载",
+        "基础配置"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "config:projects/configs/_base_/datasets/nus-3d.py",
+      "type": "config",
+      "name": "nus-3d.py",
+      "summary": "mmdet3d 标准 nuScenes 3D 检测数据集配置,定义 LiDAR 点云加载、多帧 sweeps、数据增强与 Collect3D pipeline,属于上游基础数据集模板。",
+      "filePath": "projects/configs/_base_/datasets/nus-3d.py",
+      "tags": [
+        "数据集配置",
+        "nuScenes",
+        "点云",
+        "数据加载"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "config:projects/configs/_base_/datasets/nus-mono3d.py",
+      "type": "config",
+      "name": "nus-mono3d.py",
+      "summary": "mmdet3d 单目 3D 检测(mono3d)nuScenes 数据集配置模板,定义图像加载与单目检测 pipeline。",
+      "filePath": "projects/configs/_base_/datasets/nus-mono3d.py",
+      "tags": [
+        "数据集配置",
+        "单目3D",
+        "nuScenes"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "config:projects/configs/_base_/datasets/kitti-3d-3class.py",
+      "type": "config",
+      "name": "kitti-3d-3class.py",
+      "summary": "mmdet3d KITTI 三类(Car/Pedestrian/Cyclist)3D 检测数据集配置模板,属于上游通用基础配置。",
+      "filePath": "projects/configs/_base_/datasets/kitti-3d-3class.py",
+      "tags": [
+        "数据集配置",
+        "KITTI",
+        "3D检测"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "config:projects/configs/VAD/VAD_base_e2e.py",
+      "type": "config",
+      "name": "VAD_base_e2e.py",
+      "summary": "VADv1 base 版端到端(e2e)主配置:完整定义 VAD 模型(ResNet50+FPN 主干、VADHead、VADPerceptionTransformer/BEVFormerEncoder、检测/地图/运动/规划解码器)、各类损失(含 plan_reg/col/bound/dir 规划损失全开)、数据 pipeline、AdamW 优化器与 60 epoch 余弦退火调度。",
+      "filePath": "projects/configs/VAD/VAD_base_e2e.py",
+      "tags": [
+        "VAD配置",
+        "端到端",
+        "BEV特征",
+        "Transformer",
+        "规划",
+        "模型定义"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "config:projects/configs/VAD/VAD_base_stage_1.py",
+      "type": "config",
+      "name": "VAD_base_stage_1.py",
+      "summary": "VAD base 第一阶段训练配置:在 e2e 基础上关闭全部规划损失(plan_reg/bound/col/dir 权重置 0),先训练感知与地图/运动模块,训练 48 epoch。",
+      "filePath": "projects/configs/VAD/VAD_base_stage_1.py",
+      "tags": [
+        "VAD配置",
+        "分阶段训练",
+        "感知",
+        "BEV特征"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "config:projects/configs/VAD/VAD_base_stage_2.py",
+      "type": "config",
+      "name": "VAD_base_stage_2.py",
+      "summary": "VAD base 第二阶段训练配置:从 stage_1 checkpoint(VAD_base_stage_1.pth)加载,降低检测/地图损失权重以微调规划,训练 12 epoch。",
+      "filePath": "projects/configs/VAD/VAD_base_stage_2.py",
+      "tags": [
+        "VAD配置",
+        "分阶段训练",
+        "微调",
+        "规划"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "config:projects/configs/VAD/VAD_tiny_e2e.py",
+      "type": "config",
+      "name": "VAD_tiny_e2e.py",
+      "summary": "VAD tiny 版端到端配置:相较 base 版减小 BEV 分辨率(100x100)、单尺度特征(_num_levels_=1)、queue_length=3,轻量化端到端训练 60 epoch。",
+      "filePath": "projects/configs/VAD/VAD_tiny_e2e.py",
+      "tags": [
+        "VAD配置",
+        "轻量化",
+        "端到端",
+        "BEV特征"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "config:projects/configs/VAD/VAD_tiny_stage_1.py",
+      "type": "config",
+      "name": "VAD_tiny_stage_1.py",
+      "summary": "VAD tiny 第一阶段训练配置:轻量化版本下关闭规划损失,先训练感知/地图/运动模块。",
+      "filePath": "projects/configs/VAD/VAD_tiny_stage_1.py",
+      "tags": [
+        "VAD配置",
+        "轻量化",
+        "分阶段训练",
+        "感知"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "config:projects/configs/VAD/VAD_tiny_stage_2.py",
+      "type": "config",
+      "name": "VAD_tiny_stage_2.py",
+      "summary": "VAD tiny 第二阶段训练配置:从 tiny stage_1 checkpoint 加载并微调规划模块的轻量化配置。",
+      "filePath": "projects/configs/VAD/VAD_tiny_stage_2.py",
+      "tags": [
+        "VAD配置",
+        "轻量化",
+        "分阶段训练",
+        "规划"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "config:VADv2/VADv2_config_voca4096.py",
+      "type": "config",
+      "name": "VADv2_config_voca4096.py",
+      "summary": "VADv2 在 CARLA 数据集上的配置:模型类型 v116ADTR,使用 4096 规划词表(plan_anchors 词汇)实现概率化规划,定义 v116ADTRHead、多个 v0MotionTransformerDecoder(ego/agent/map/motion)、额外的卷积主干(cf_backbone),面向闭环自动驾驶。",
+      "filePath": "VADv2/VADv2_config_voca4096.py",
+      "tags": [
+        "VADv2配置",
+        "CARLA",
+        "规划词表",
+        "闭环",
+        "Transformer",
+        "模型定义"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "document:README.md",
+      "type": "document",
+      "name": "README.md",
+      "summary": "VAD v1与v2项目主说明文档,介绍向量化端到端自动驾驶范式、模型指标(VAD-Tiny/Base)、nuScenes开环与CARLA闭环结果、安装与引用信息。",
+      "tags": [
+        "项目说明",
+        "端到端规划",
+        "向量化表示"
+      ],
+      "filePath": "README.md",
+      "complexity": "simple"
+    },
+    {
+      "id": "document:learning_plan.md",
+      "type": "document",
+      "name": "learning_plan.md",
+      "summary": "一周VAD/VADv2学习计划,按天拆解论文精读、主干代码、感知地图模块、规划模块、实验评测,面向规则规划转端到端的面试准备。",
+      "tags": [
+        "学习计划",
+        "面试准备",
+        "规划"
+      ],
+      "filePath": "learning_plan.md",
+      "complexity": "simple"
+    },
+    {
+      "id": "document:面试准备总览.md",
+      "type": "document",
+      "name": "面试准备总览.md",
+      "summary": "面试准备总览,汇总各学习资料、面试题库分类(基础/技术/深度)、规则规划转端到端的必答题、STAR答题结构与实战技巧。",
+      "tags": [
+        "面试准备",
+        "学习总览",
+        "规划对比"
+      ],
+      "filePath": "面试准备总览.md",
+      "complexity": "simple"
+    },
+    {
+      "id": "document:VAD_论文总结_详细版.md",
+      "type": "document",
+      "name": "VAD_论文总结_详细版.md",
+      "summary": "VAD论文逐章详解,涵盖Abstract、Related Work、Method(四阶段架构/向量化场景/规划约束)、Experiments、Conclusion及术语表,含公式与图表说明。",
+      "tags": [
+        "论文总结",
+        "向量化表示",
+        "端到端规划",
+        "BEV特征"
+      ],
+      "filePath": "VAD_论文总结_详细版.md",
+      "complexity": "complex"
+    },
+    {
+      "id": "document:代码阅读指南_论文对应.md",
+      "type": "document",
+      "name": "代码阅读指南_论文对应.md",
+      "summary": "建立VAD论文章节与代码实现的精确映射,按BEV编码、地图学习、运动预测、规划交互、向量化约束逐步给出对应文件、类与函数及阅读路径。",
+      "tags": [
+        "代码导读",
+        "论文对应",
+        "规划",
+        "Transformer"
+      ],
+      "filePath": "代码阅读指南_论文对应.md",
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:VAD模型架构详解.md",
+      "type": "document",
+      "name": "VAD模型架构详解.md",
+      "summary": "VAD模型架构最详尽的源码级解读,涵盖整体前向流程、图像特征提取(ResNet+FPN)、BEV编码(时序/空间注意力)、VADHead主体、显存与时序对齐等实现细节。",
+      "tags": [
+        "模型架构",
+        "BEV特征",
+        "Transformer",
+        "注意力机制",
+        "特征提取"
+      ],
+      "filePath": "VAD模型架构详解.md",
+      "complexity": "complex"
+    },
+    {
+      "id": "document:VAD面试题库_含答案.md",
+      "type": "document",
+      "name": "VAD面试题库_含答案.md",
+      "summary": "VAD/VADv2基础概念题与技术细节题的标准答案,覆盖向量化表示、BEV生成、Query交互、多模态Min-of-N损失、三大约束、v1与v2对比等。",
+      "tags": [
+        "面试题库",
+        "向量化表示",
+        "规划",
+        "注意力机制"
+      ],
+      "filePath": "VAD面试题库_含答案.md",
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:VAD面试题库_高级部分.md",
+      "type": "document",
+      "name": "VAD面试题库_高级部分.md",
+      "summary": "VAD面试深度理解题,探讨向量化为何优于栅格化、Query交互与特征融合的本质区别、损失权重平衡、开环评估局限及7个改进方向。",
+      "tags": [
+        "面试题库",
+        "深度理解",
+        "规划",
+        "改进方向"
+      ],
+      "filePath": "VAD面试题库_高级部分.md",
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:VAD数据使用说明.md",
+      "type": "document",
+      "name": "VAD数据使用说明.md",
+      "summary": "澄清VAD为纯视觉方法,只用6相机图像作输入,训练用nuScenes已标注的3D框作GT监督,推理与训练均不读取点云,并按标注/训练/推理三阶段说明数据使用。",
+      "tags": [
+        "数据使用",
+        "纯视觉",
+        "数据加载",
+        "3D检测"
+      ],
+      "filePath": "VAD数据使用说明.md",
+      "complexity": "simple"
+    },
+    {
+      "id": "document:3D标注流程详解.md",
+      "type": "document",
+      "name": "3D标注流程详解.md",
+      "summary": "详解nuScenes在LiDAR点云上标注3D框的真实工作流、2D与3D标注对比、可视化来源、标注成本及自动标注(大模型/弱监督/主动学习)方向。",
+      "tags": [
+        "3D标注",
+        "nuScenes",
+        "数据闭环",
+        "3D检测"
+      ],
+      "filePath": "3D标注流程详解.md",
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:3D框和类别在模型中的作用.md",
+      "type": "document",
+      "name": "3D框和类别在模型中的作用.md",
+      "summary": "解析3D框GT与类别在VAD中的四大作用:训练检测、监督运动预测、支持规划碰撞约束、促进表示学习,以及类别对多模态轨迹与训练推理角色变化的影响。",
+      "tags": [
+        "3D检测",
+        "运动预测",
+        "规划约束",
+        "多任务学习"
+      ],
+      "filePath": "3D框和类别在模型中的作用.md",
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:CAN总线与ego位姿详解.md",
+      "type": "document",
+      "name": "CAN总线与ego位姿详解.md",
+      "summary": "详解CAN总线与ego位姿数据的来源与区别,nuScenes中的存储与VAD预处理脚本的使用方式,以及ego低频特征(LCF)9维含义和低频命名的信号处理解释。",
+      "tags": [
+        "CAN总线",
+        "ego位姿",
+        "数据处理",
+        "自车特征"
+      ],
+      "filePath": "CAN总线与ego位姿详解.md",
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:nuScenes地图格式详解.md",
+      "type": "document",
+      "name": "nuScenes地图格式详解.md",
+      "summary": "详解nuScenes HD Map的JSON存储与层级结构,VAD使用的3类地图元素(车道分隔线/道路边界/人行横道),以及查询、点采样、坐标变换到.pkl的完整处理流程。",
+      "tags": [
+        "HD地图",
+        "向量化地图",
+        "nuScenes",
+        "数据处理"
+      ],
+      "filePath": "nuScenes地图格式详解.md",
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:数据处理与特征提取指南.md",
+      "type": "document",
+      "name": "数据处理与特征提取指南.md",
+      "summary": "VAD数据处理与特征提取分步指南,涵盖预处理脚本ego轨迹/指令/LCF特征生成、Dataset与Pipeline处理、图像到多尺度特征再到BEV特征的实战流程与张量形状。",
+      "tags": [
+        "数据处理",
+        "特征提取",
+        "BEV特征",
+        "数据加载"
+      ],
+      "filePath": "数据处理与特征提取指南.md",
+      "complexity": "complex"
+    },
+    {
+      "id": "document:数据处理与闭环系统.md",
+      "type": "document",
+      "name": "数据处理与闭环系统.md",
+      "summary": "系统讲解VAD三种推理场景、训练数据流与各类GT溯源、评测与实车部署数据流,以及数据闭环系统(GT自动获取/触发器/仿真闭环)与业界数据闭环实践。",
+      "tags": [
+        "数据闭环",
+        "数据处理",
+        "训练数据流",
+        "部署"
+      ],
+      "filePath": "数据处理与闭环系统.md",
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/VAD/VAD.py:VAD",
+      "type": "class",
+      "name": "VAD",
+      "summary": "VAD模型主类(MVXTwoStageDetector子类),纯视觉端到端检测器,负责图像特征提取与调用感知规划头,前向入口为forward_train/forward_test。",
+      "tags": [
+        "模型主体",
+        "端到端规划",
+        "纯视觉"
+      ],
+      "filePath": "projects/mmdet3d_plugin/VAD/VAD.py",
+      "complexity": "complex"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/VAD/VAD.py:forward_train",
+      "type": "function",
+      "name": "forward_train",
+      "summary": "VAD训练前向入口,接收多帧图像与各类GT,完成图像特征提取并调用pts_bbox_head计算检测、地图、运动、规划等损失。",
+      "tags": [
+        "训练入口",
+        "前向传播",
+        "损失计算"
+      ],
+      "filePath": "projects/mmdet3d_plugin/VAD/VAD.py",
+      "complexity": "complex"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/VAD/VAD.py:extract_img_feat",
+      "type": "function",
+      "name": "extract_img_feat",
+      "summary": "图像特征提取,将多视角多帧图像送入img_backbone(ResNet)与img_neck(FPN)得到多尺度特征。",
+      "tags": [
+        "特征提取",
+        "ResNet",
+        "FPN"
+      ],
+      "filePath": "projects/mmdet3d_plugin/VAD/VAD.py",
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/VAD/VAD.py:extract_feat",
+      "type": "function",
+      "name": "extract_feat",
+      "summary": "特征提取封装,处理时序队列并调用extract_img_feat,输出供BEV编码使用的多尺度图像特征。",
+      "tags": [
+        "特征提取",
+        "时序处理"
+      ],
+      "filePath": "projects/mmdet3d_plugin/VAD/VAD.py",
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/VAD/VAD_head.py:VADHead",
+      "type": "class",
+      "name": "VADHead",
+      "summary": "VAD核心任务头(DETRHead子类),整合BEV编码、向量化地图检测、agent运动预测与自车规划,并计算全部损失。",
+      "tags": [
+        "任务头",
+        "规划",
+        "运动预测",
+        "向量化地图"
+      ],
+      "filePath": "projects/mmdet3d_plugin/VAD/VAD_head.py",
+      "complexity": "complex"
+    },
+    {
+      "id": "function:projects/mmdet3d_plugin/VAD/VAD_head.py:loss",
+      "type": "function",
+      "name": "loss",
+      "summary": "VADHead损失计算,汇总地图回归/分类、agent检测、Min-of-N轨迹、规划模仿与三大向量化约束等损失。",
+      "tags": [
+        "损失计算",
+        "规划约束",
+        "多任务学习"
+      ],
+      "filePath": "projects/mmdet3d_plugin/VAD/VAD_head.py",
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/VAD/VAD_head.py:LaneNet",
+      "type": "class",
+      "name": "LaneNet",
+      "summary": "车道/地图向量编码子网络,用于将向量化地图点特征编码供后续交互使用。",
+      "tags": [
+        "向量化地图",
+        "特征编码"
+      ],
+      "filePath": "projects/mmdet3d_plugin/VAD/VAD_head.py",
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/VAD/VAD_head.py:MLP",
+      "type": "class",
+      "name": "MLP",
+      "summary": "通用多层感知机模块,用于轨迹回归、规划头等处的特征映射。",
+      "tags": [
+        "MLP",
+        "基础模块"
+      ],
+      "filePath": "projects/mmdet3d_plugin/VAD/VAD_head.py",
+      "complexity": "simple"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/VAD/VAD_transformer.py:VADPerceptionTransformer",
+      "type": "class",
+      "name": "VADPerceptionTransformer",
+      "summary": "VAD感知Transformer(BEVFormer风格),通过空间交叉注意力与时序自注意力从多视角图像生成BEV特征,提供get_bev_features接口。",
+      "tags": [
+        "BEV特征",
+        "Transformer",
+        "注意力机制"
+      ],
+      "filePath": "projects/mmdet3d_plugin/VAD/VAD_transformer.py",
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/VAD/VAD_transformer.py:MapDetectionTransformerDecoder",
+      "type": "class",
+      "name": "MapDetectionTransformerDecoder",
+      "summary": "向量化地图检测Transformer解码器,以地图query与BEV特征交互,输出车道线/边界/人行横道的向量化检测特征。",
+      "tags": [
+        "向量化地图",
+        "Transformer",
+        "解码器"
+      ],
+      "filePath": "projects/mmdet3d_plugin/VAD/VAD_transformer.py",
+      "complexity": "complex"
+    },
+    {
+      "id": "class:projects/mmdet3d_plugin/VAD/VAD_transformer.py:CustomTransformerDecoder",
+      "type": "class",
+      "name": "CustomTransformerDecoder",
+      "summary": "自定义Transformer解码器,用于agent运动与规划等模块的query交互。",
+      "tags": [
+        "Transformer",
+        "解码器",
+        "Query交互"
+      ],
+      "filePath": "projects/mmdet3d_plugin/VAD/VAD_transformer.py",
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:projects/mmdet3d_plugin/VAD/utils/plan_loss.py",
+      "type": "document",
+      "name": "plan_loss.py",
+      "summary": "规划约束损失实现文件,包含碰撞约束、边界越界约束、车道方向约束等向量化规划损失的计算逻辑。",
+      "tags": [
+        "规划约束",
+        "损失计算",
+        "向量化约束"
+      ],
+      "filePath": "projects/mmdet3d_plugin/VAD/utils/plan_loss.py",
+      "complexity": "complex"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/dense_heads/__init__.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/detectors/__init__.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/modules/__init__.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/runner/__init__.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/hooks/__init__.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/detectors/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/detectors/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/detectors/bevformer_fp16.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:BEVFormer",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:BEVFormer",
+      "target": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:extract_img_feat",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:BEVFormer",
+      "target": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:obtain_history_bev",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:BEVFormer",
+      "target": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:forward_train",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:BEVFormer",
+      "target": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:forward_test",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:BEVFormer",
+      "target": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:simple_test",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:BEVFormer",
+      "target": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:forward_pts_train",
+      "type": "contains"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:forward_train",
+      "target": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:obtain_history_bev",
+      "type": "calls"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:forward_train",
+      "target": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:forward_pts_train",
+      "type": "calls"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:forward_test",
+      "target": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:simple_test",
+      "type": "calls"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:obtain_history_bev",
+      "target": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:extract_img_feat",
+      "type": "calls"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:forward_pts_train",
+      "target": "function:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:loss",
+      "type": "calls"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/detectors/bevformer_fp16.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/detectors/bevformer_fp16.py:BEVFormer_fp16",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/detectors/bevformer_fp16.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py",
+      "type": "imports"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/detectors/bevformer_fp16.py:BEVFormer_fp16",
+      "target": "class:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py:BEVFormer",
+      "type": "inherits"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/dense_heads/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:BEVFormerHead",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:BEVFormerHead",
+      "target": "function:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:forward",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:BEVFormerHead",
+      "target": "function:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:loss",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:BEVFormerHead",
+      "target": "function:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:get_bboxes",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:BEVFormerHead",
+      "target": "function:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:get_targets",
+      "type": "contains"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:loss",
+      "target": "function:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:get_targets",
+      "type": "calls"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py:forward",
+      "target": "function:projects/mmdet3d_plugin/bevformer/modules/transformer.py:get_bev_features",
+      "type": "calls"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/modules/transformer.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/modules/temporal_self_attention.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/modules/encoder.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/modules/decoder.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/transformer.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/transformer.py:PerceptionTransformer",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/modules/transformer.py:PerceptionTransformer",
+      "target": "function:projects/mmdet3d_plugin/bevformer/modules/transformer.py:get_bev_features",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/transformer.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/modules/temporal_self_attention.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/transformer.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/transformer.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/modules/decoder.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/encoder.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/encoder.py:BEVFormerEncoder",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/encoder.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/encoder.py:BEVFormerLayer",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/modules/encoder.py:BEVFormerEncoder",
+      "target": "function:projects/mmdet3d_plugin/bevformer/modules/encoder.py:get_reference_points",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/modules/encoder.py:BEVFormerEncoder",
+      "target": "function:projects/mmdet3d_plugin/bevformer/modules/encoder.py:point_sampling",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/encoder.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/modules/custom_base_transformer_layer.py",
+      "type": "imports"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/modules/encoder.py:BEVFormerLayer",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/custom_base_transformer_layer.py:MyCustomBaseTransformerLayer",
+      "type": "inherits"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/bevformer/modules/transformer.py:get_bev_features",
+      "target": "function:projects/mmdet3d_plugin/bevformer/modules/encoder.py:point_sampling",
+      "type": "calls"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/bevformer/modules/encoder.py:point_sampling",
+      "target": "function:projects/mmdet3d_plugin/bevformer/modules/encoder.py:get_reference_points",
+      "type": "calls"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py:SpatialCrossAttention",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py:MSDeformableAttention3D",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/modules/multi_scale_deformable_attn_function.py",
+      "type": "imports"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/modules/encoder.py:BEVFormerLayer",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py:SpatialCrossAttention",
+      "type": "calls"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/modules/encoder.py:BEVFormerLayer",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/temporal_self_attention.py:TemporalSelfAttention",
+      "type": "calls"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py:SpatialCrossAttention",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py:MSDeformableAttention3D",
+      "type": "calls"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/temporal_self_attention.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/temporal_self_attention.py:TemporalSelfAttention",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/temporal_self_attention.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/modules/multi_scale_deformable_attn_function.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/decoder.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/decoder.py:DetectionTransformerDecoder",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/decoder.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/decoder.py:CustomMSDeformableAttention",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/decoder.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/modules/multi_scale_deformable_attn_function.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/custom_base_transformer_layer.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/custom_base_transformer_layer.py:MyCustomBaseTransformerLayer",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/multi_scale_deformable_attn_function.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/multi_scale_deformable_attn_function.py:MultiScaleDeformableAttnFunction_fp32",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/modules/multi_scale_deformable_attn_function.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/modules/multi_scale_deformable_attn_function.py:MultiScaleDeformableAttnFunction_fp16",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/apis/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/apis/train.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/apis/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/apis/mmdet_train.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/apis/train.py",
+      "target": "function:projects/mmdet3d_plugin/bevformer/apis/train.py:custom_train_model",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/apis/train.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/apis/mmdet_train.py",
+      "type": "imports"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/bevformer/apis/train.py:custom_train_model",
+      "target": "function:projects/mmdet3d_plugin/bevformer/apis/mmdet_train.py:custom_train_detector",
+      "type": "calls"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/apis/mmdet_train.py",
+      "target": "function:projects/mmdet3d_plugin/bevformer/apis/mmdet_train.py:custom_train_detector",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/apis/test.py",
+      "target": "function:projects/mmdet3d_plugin/bevformer/apis/test.py:custom_multi_gpu_test",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/runner/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/runner/epoch_based_runner.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/runner/epoch_based_runner.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/runner/epoch_based_runner.py:EpochBasedRunner_video",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/hooks/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/bevformer/hooks/custom_hooks.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/bevformer/hooks/custom_hooks.py",
+      "target": "class:projects/mmdet3d_plugin/bevformer/hooks/custom_hooks.py:TransferWeight",
+      "type": "contains"
+    },
+    {
+      "source": "file:VADv2/VADv2_head.py",
+      "target": "class:VADv2/VADv2_head.py:MLP",
+      "type": "contains"
+    },
+    {
+      "source": "file:VADv2/VADv2_head.py",
+      "target": "class:VADv2/VADv2_head.py:LaneNet",
+      "type": "contains"
+    },
+    {
+      "source": "file:VADv2/VADv2_head.py",
+      "target": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "type": "contains"
+    },
+    {
+      "source": "file:VADv2/VADv2_head.py",
+      "target": "class:VADv2/VADv2_head.py:PlanningMetric",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:LaneNet",
+      "target": "class:VADv2/VADv2_head.py:MLP",
+      "type": "calls"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "class:VADv2/VADv2_head.py:PlanningMetric",
+      "type": "calls"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:_init_layers",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:forward",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:loss",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:loss_planning",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:loss_single",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:map_loss_single",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:get_bboxes",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:get_plan_col_target",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:get_plan_bd_target",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:get_plan_cl_target",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:get_plan_expert_target",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:get_targets",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:map_get_targets",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:select_and_pad_query",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "function:VADv2/VADv2_head.py:select_and_pad_pred_map",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:PlanningMetric",
+      "target": "function:VADv2/VADv2_head.py:evaluate_coll",
+      "type": "contains"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:PlanningMetric",
+      "target": "function:VADv2/VADv2_head.py:get_label",
+      "type": "contains"
+    },
+    {
+      "source": "function:VADv2/VADv2_head.py:loss",
+      "target": "function:VADv2/VADv2_head.py:loss_single",
+      "type": "calls"
+    },
+    {
+      "source": "function:VADv2/VADv2_head.py:loss",
+      "target": "function:VADv2/VADv2_head.py:map_loss_single",
+      "type": "calls"
+    },
+    {
+      "source": "function:VADv2/VADv2_head.py:loss",
+      "target": "function:VADv2/VADv2_head.py:loss_planning",
+      "type": "calls"
+    },
+    {
+      "source": "function:VADv2/VADv2_head.py:loss_single",
+      "target": "function:VADv2/VADv2_head.py:get_targets",
+      "type": "calls"
+    },
+    {
+      "source": "function:VADv2/VADv2_head.py:map_loss_single",
+      "target": "function:VADv2/VADv2_head.py:map_get_targets",
+      "type": "calls"
+    },
+    {
+      "source": "function:VADv2/VADv2_head.py:loss_planning",
+      "target": "function:VADv2/VADv2_head.py:get_plan_col_target",
+      "type": "calls"
+    },
+    {
+      "source": "function:VADv2/VADv2_head.py:loss_planning",
+      "target": "function:VADv2/VADv2_head.py:get_plan_bd_target",
+      "type": "calls"
+    },
+    {
+      "source": "function:VADv2/VADv2_head.py:loss_planning",
+      "target": "function:VADv2/VADv2_head.py:get_plan_cl_target",
+      "type": "calls"
+    },
+    {
+      "source": "function:VADv2/VADv2_head.py:loss_planning",
+      "target": "function:VADv2/VADv2_head.py:get_plan_expert_target",
+      "type": "calls"
+    },
+    {
+      "source": "function:VADv2/VADv2_head.py:get_plan_col_target",
+      "target": "function:VADv2/VADv2_head.py:evaluate_coll",
+      "type": "calls"
+    },
+    {
+      "source": "function:VADv2/VADv2_head.py:get_plan_col_target",
+      "target": "function:VADv2/VADv2_head.py:get_label",
+      "type": "calls"
+    },
+    {
+      "source": "function:VADv2/VADv2_head.py:forward",
+      "target": "function:VADv2/VADv2_head.py:select_and_pad_query",
+      "type": "calls"
+    },
+    {
+      "source": "function:VADv2/VADv2_head.py:forward",
+      "target": "function:VADv2/VADv2_head.py:select_and_pad_pred_map",
+      "type": "calls"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py",
+      "target": "class:projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py:HungarianAssigner3D",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py:HungarianAssigner3D",
+      "target": "function:projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py:assign",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py",
+      "target": "file:projects/mmdet3d_plugin/core/bbox/util.py",
+      "type": "imports"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py:assign",
+      "target": "function:projects/mmdet3d_plugin/core/bbox/util.py:normalize_bbox",
+      "type": "calls"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py",
+      "target": "class:projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py:MapHungarianAssigner3D",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py:MapHungarianAssigner3D",
+      "target": "function:projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py:assign",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py",
+      "target": "file:projects/mmdet3d_plugin/core/bbox/util.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/assigners/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/assigners/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/assigners/__init__.py",
+      "target": "class:projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py:HungarianAssigner3D",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/assigners/__init__.py",
+      "target": "class:projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py:MapHungarianAssigner3D",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/coders/nms_free_coder.py",
+      "target": "class:projects/mmdet3d_plugin/core/bbox/coders/nms_free_coder.py:NMSFreeCoder",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/coders/nms_free_coder.py",
+      "target": "file:projects/mmdet3d_plugin/core/bbox/util.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/coders/fut_nms_free_coder.py",
+      "target": "class:projects/mmdet3d_plugin/core/bbox/coders/fut_nms_free_coder.py:CustomNMSFreeCoder",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/coders/fut_nms_free_coder.py",
+      "target": "file:projects/mmdet3d_plugin/core/bbox/util.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/coders/map_nms_free_coder.py",
+      "target": "class:projects/mmdet3d_plugin/core/bbox/coders/map_nms_free_coder.py:MapNMSFreeCoder",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/coders/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/core/bbox/coders/nms_free_coder.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/coders/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/core/bbox/coders/fut_nms_free_coder.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/coders/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/core/bbox/coders/map_nms_free_coder.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/match_costs/match_cost.py",
+      "target": "class:projects/mmdet3d_plugin/core/bbox/match_costs/match_cost.py:BBox3DL1Cost",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/util.py",
+      "target": "function:projects/mmdet3d_plugin/core/bbox/util.py:normalize_bbox",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/util.py",
+      "target": "function:projects/mmdet3d_plugin/core/bbox/util.py:denormalize_bbox",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/coders/nms_free_coder.py",
+      "target": "function:projects/mmdet3d_plugin/core/bbox/util.py:denormalize_bbox",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/coders/fut_nms_free_coder.py",
+      "target": "function:projects/mmdet3d_plugin/core/bbox/util.py:denormalize_bbox",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/structures/lidar_box3d.py",
+      "target": "class:projects/mmdet3d_plugin/core/bbox/structures/lidar_box3d.py:CustomLiDARInstance3DBoxes",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/bbox/structures/nuscenes_box.py",
+      "target": "class:projects/mmdet3d_plugin/core/bbox/structures/nuscenes_box.py:CustomNuscenesBox",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/evaluation/metric_motion.py",
+      "target": "function:projects/mmdet3d_plugin/core/evaluation/metric_motion.py:get_ade",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/evaluation/metric_motion.py",
+      "target": "function:projects/mmdet3d_plugin/core/evaluation/metric_motion.py:get_fde",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/evaluation/metric_motion.py",
+      "target": "function:projects/mmdet3d_plugin/core/evaluation/metric_motion.py:get_best_preds",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/evaluation/eval_hooks.py",
+      "target": "class:projects/mmdet3d_plugin/core/evaluation/eval_hooks.py:CustomDistEvalHook",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/evaluation/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/core/evaluation/eval_hooks.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/core/evaluation/__init__.py",
+      "target": "class:projects/mmdet3d_plugin/core/evaluation/eval_hooks.py:CustomDistEvalHook",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py",
+      "target": "class:projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py:VADCustomNuScenesDataset",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py",
+      "target": "class:projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py:LiDARInstanceLines",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py",
+      "target": "file:projects/mmdet3d_plugin/datasets/vad_custom_nuscenes_eval.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py",
+      "target": "file:projects/mmdet3d_plugin/core/bbox/structures/nuscenes_box.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py",
+      "target": "class:projects/mmdet3d_plugin/core/bbox/structures/nuscenes_box.py:CustomNuscenesBox",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/vad_custom_nuscenes_eval.py",
+      "target": "class:projects/mmdet3d_plugin/datasets/vad_custom_nuscenes_eval.py:DetectionBox_modified",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/pipelines/loading.py",
+      "target": "class:projects/mmdet3d_plugin/datasets/pipelines/loading.py:CustomLoadPointsFromMultiSweeps",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/pipelines/formating.py",
+      "target": "class:projects/mmdet3d_plugin/datasets/pipelines/formating.py:CustomDefaultFormatBundle3D",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/pipelines/transform_3d.py",
+      "target": "class:projects/mmdet3d_plugin/datasets/pipelines/transform_3d.py:CustomObjectRangeFilter",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/pipelines/transform_3d.py",
+      "target": "class:projects/mmdet3d_plugin/datasets/pipelines/transform_3d.py:NormalizeMultiviewImage",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/pipelines/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/datasets/pipelines/transform_3d.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/pipelines/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/datasets/pipelines/formating.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/pipelines/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/datasets/pipelines/loading.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/__init__.py",
+      "target": "class:projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py:VADCustomNuScenesDataset",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/builder.py",
+      "target": "function:projects/mmdet3d_plugin/datasets/builder.py:build_dataloader",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/builder.py",
+      "target": "function:projects/mmdet3d_plugin/datasets/builder.py:custom_build_dataset",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/builder.py",
+      "target": "file:projects/mmdet3d_plugin/datasets/samplers/distributed_sampler.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/builder.py",
+      "target": "file:projects/mmdet3d_plugin/datasets/samplers/sampler.py",
+      "type": "imports"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/datasets/builder.py:build_dataloader",
+      "target": "file:projects/mmdet3d_plugin/datasets/samplers/sampler.py",
+      "type": "calls"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py",
+      "target": "function:projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py:eval_map",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py",
+      "target": "function:projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py:average_precision",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py",
+      "target": "file:projects/mmdet3d_plugin/datasets/map_utils/tpfp.py",
+      "type": "imports"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py:eval_map",
+      "target": "function:projects/mmdet3d_plugin/datasets/map_utils/tpfp.py:custom_tpfp_gen",
+      "type": "calls"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py:eval_map",
+      "target": "function:projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py:average_precision",
+      "type": "calls"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/map_utils/tpfp.py",
+      "target": "function:projects/mmdet3d_plugin/datasets/map_utils/tpfp.py:custom_tpfp_gen",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/map_utils/tpfp.py",
+      "target": "function:projects/mmdet3d_plugin/datasets/map_utils/tpfp.py:tpfp_gen",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/samplers/sampler.py",
+      "target": "file:projects/mmdet3d_plugin/datasets/samplers/distributed_sampler.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/samplers/distributed_sampler.py",
+      "target": "class:projects/mmdet3d_plugin/datasets/samplers/distributed_sampler.py:DistributedSampler",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/datasets/samplers/distributed_sampler.py",
+      "target": "file:projects/mmdet3d_plugin/datasets/samplers/sampler.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/backbones/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/hooks/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/models/hooks/hooks.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/opt/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/models/opt/adamw.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/utils/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/models/utils/bricks.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/utils/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/models/utils/grid_mask.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/utils/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/models/utils/position_embedding.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/utils/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/models/utils/visual.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/utils/__init__.py",
+      "target": "file:projects/mmdet3d_plugin/models/utils/embed.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/hooks/hooks.py",
+      "target": "file:projects/mmdet3d_plugin/models/utils/__init__.py",
+      "type": "imports"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "target": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:VoVNet",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "target": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:_OSA_module",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "target": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:_OSA_stage",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "target": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:eSEModule",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "target": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:Hsigmoid",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "target": "function:projects/mmdet3d_plugin/models/backbones/vovnet.py:conv3x3",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "target": "function:projects/mmdet3d_plugin/models/backbones/vovnet.py:conv1x1",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/backbones/vovnet.py",
+      "target": "function:projects/mmdet3d_plugin/models/backbones/vovnet.py:dw_conv3x3",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/hooks/hooks.py",
+      "target": "class:projects/mmdet3d_plugin/models/hooks/hooks.py:GradChecker",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/opt/adamw.py",
+      "target": "class:projects/mmdet3d_plugin/models/opt/adamw.py:AdamW2",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/utils/embed.py",
+      "target": "class:projects/mmdet3d_plugin/models/utils/embed.py:PatchEmbed",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/utils/grid_mask.py",
+      "target": "class:projects/mmdet3d_plugin/models/utils/grid_mask.py:GridMask",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/utils/grid_mask.py",
+      "target": "class:projects/mmdet3d_plugin/models/utils/grid_mask.py:Grid",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/utils/position_embedding.py",
+      "target": "class:projects/mmdet3d_plugin/models/utils/position_embedding.py:RelPositionEmbedding",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/utils/position_embedding.py",
+      "target": "class:projects/mmdet3d_plugin/models/utils/position_embedding.py:SineEmbedding",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/utils/bricks.py",
+      "target": "function:projects/mmdet3d_plugin/models/utils/bricks.py:run_time",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/utils/visual.py",
+      "target": "function:projects/mmdet3d_plugin/models/utils/visual.py:save_tensor",
+      "type": "contains"
+    },
+    {
+      "source": "file:projects/mmdet3d_plugin/models/utils/visual.py",
+      "target": "function:projects/mmdet3d_plugin/models/utils/visual.py:convert_color",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:VoVNet",
+      "target": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:_OSA_stage",
+      "type": "calls"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:_OSA_stage",
+      "target": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:_OSA_module",
+      "type": "calls"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:_OSA_module",
+      "target": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:eSEModule",
+      "type": "calls"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:eSEModule",
+      "target": "class:projects/mmdet3d_plugin/models/backbones/vovnet.py:Hsigmoid",
+      "type": "calls"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/models/utils/visual.py:save_tensor",
+      "target": "function:projects/mmdet3d_plugin/models/utils/visual.py:convert_color",
+      "type": "calls"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/models/hooks/hooks.py:GradChecker",
+      "target": "function:projects/mmdet3d_plugin/models/utils/bricks.py:run_time",
+      "type": "imports"
+    },
+    {
+      "source": "config:projects/configs/VAD/VAD_base_e2e.py",
+      "target": "config:projects/configs/datasets/custom_nus-3d.py",
+      "type": "imports"
+    },
+    {
+      "source": "config:projects/configs/VAD/VAD_base_e2e.py",
+      "target": "config:projects/configs/_base_/default_runtime.py",
+      "type": "imports"
+    },
+    {
+      "source": "config:projects/configs/VAD/VAD_base_stage_1.py",
+      "target": "config:projects/configs/datasets/custom_nus-3d.py",
+      "type": "imports"
+    },
+    {
+      "source": "config:projects/configs/VAD/VAD_base_stage_1.py",
+      "target": "config:projects/configs/_base_/default_runtime.py",
+      "type": "imports"
+    },
+    {
+      "source": "config:projects/configs/VAD/VAD_base_stage_2.py",
+      "target": "config:projects/configs/datasets/custom_nus-3d.py",
+      "type": "imports"
+    },
+    {
+      "source": "config:projects/configs/VAD/VAD_base_stage_2.py",
+      "target": "config:projects/configs/_base_/default_runtime.py",
+      "type": "imports"
+    },
+    {
+      "source": "config:projects/configs/VAD/VAD_tiny_e2e.py",
+      "target": "config:projects/configs/datasets/custom_nus-3d.py",
+      "type": "imports"
+    },
+    {
+      "source": "config:projects/configs/VAD/VAD_tiny_e2e.py",
+      "target": "config:projects/configs/_base_/default_runtime.py",
+      "type": "imports"
+    },
+    {
+      "source": "config:projects/configs/VAD/VAD_tiny_stage_1.py",
+      "target": "config:projects/configs/datasets/custom_nus-3d.py",
+      "type": "imports"
+    },
+    {
+      "source": "config:projects/configs/VAD/VAD_tiny_stage_1.py",
+      "target": "config:projects/configs/_base_/default_runtime.py",
+      "type": "imports"
+    },
+    {
+      "source": "config:projects/configs/VAD/VAD_tiny_stage_2.py",
+      "target": "config:projects/configs/datasets/custom_nus-3d.py",
+      "type": "imports"
+    },
+    {
+      "source": "config:projects/configs/VAD/VAD_tiny_stage_2.py",
+      "target": "config:projects/configs/_base_/default_runtime.py",
+      "type": "imports"
+    },
+    {
+      "source": "document:README.md",
+      "target": "document:learning_plan.md",
+      "type": "references"
+    },
+    {
+      "source": "document:面试准备总览.md",
+      "target": "document:VAD_论文总结_详细版.md",
+      "type": "references"
+    },
+    {
+      "source": "document:面试准备总览.md",
+      "target": "document:代码阅读指南_论文对应.md",
+      "type": "references"
+    },
+    {
+      "source": "document:面试准备总览.md",
+      "target": "document:VAD面试题库_含答案.md",
+      "type": "references"
+    },
+    {
+      "source": "document:面试准备总览.md",
+      "target": "document:VAD面试题库_高级部分.md",
+      "type": "references"
+    },
+    {
+      "source": "document:面试准备总览.md",
+      "target": "document:learning_plan.md",
+      "type": "references"
+    },
+    {
+      "source": "document:VAD数据使用说明.md",
+      "target": "document:3D标注流程详解.md",
+      "type": "references"
+    },
+    {
+      "source": "document:VAD数据使用说明.md",
+      "target": "document:数据处理与闭环系统.md",
+      "type": "references"
+    },
+    {
+      "source": "document:VAD数据使用说明.md",
+      "target": "document:数据处理与特征提取指南.md",
+      "type": "references"
+    },
+    {
+      "source": "document:代码阅读指南_论文对应.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD.py:VAD",
+      "type": "documents"
+    },
+    {
+      "source": "document:代码阅读指南_论文对应.md",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD.py:forward_train",
+      "type": "documents"
+    },
+    {
+      "source": "document:代码阅读指南_论文对应.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD_head.py:VADHead",
+      "type": "documents"
+    },
+    {
+      "source": "document:代码阅读指南_论文对应.md",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD_head.py:loss",
+      "type": "documents"
+    },
+    {
+      "source": "document:代码阅读指南_论文对应.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD_transformer.py:VADPerceptionTransformer",
+      "type": "documents"
+    },
+    {
+      "source": "document:代码阅读指南_论文对应.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD_transformer.py:MapDetectionTransformerDecoder",
+      "type": "documents"
+    },
+    {
+      "source": "document:代码阅读指南_论文对应.md",
+      "target": "file:projects/mmdet3d_plugin/VAD/utils/plan_loss.py",
+      "type": "documents"
+    },
+    {
+      "source": "document:代码阅读指南_论文对应.md",
+      "target": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD模型架构详解.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD.py:VAD",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD模型架构详解.md",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD.py:forward_train",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD模型架构详解.md",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD.py:extract_img_feat",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD模型架构详解.md",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD.py:extract_feat",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD模型架构详解.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD_head.py:VADHead",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD模型架构详解.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD_transformer.py:VADPerceptionTransformer",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD模型架构详解.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD_head.py:MLP",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD模型架构详解.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD_head.py:LaneNet",
+      "type": "documents"
+    },
+    {
+      "source": "document:数据处理与特征提取指南.md",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD.py:extract_feat",
+      "type": "documents"
+    },
+    {
+      "source": "document:数据处理与特征提取指南.md",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD.py:extract_img_feat",
+      "type": "documents"
+    },
+    {
+      "source": "document:数据处理与特征提取指南.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD_transformer.py:VADPerceptionTransformer",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD面试题库_含答案.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD_head.py:VADHead",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD面试题库_含答案.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD_transformer.py:VADPerceptionTransformer",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD面试题库_含答案.md",
+      "target": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD面试题库_高级部分.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD_head.py:VADHead",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD面试题库_高级部分.md",
+      "target": "file:projects/mmdet3d_plugin/VAD/utils/plan_loss.py",
+      "type": "documents"
+    },
+    {
+      "source": "document:3D框和类别在模型中的作用.md",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD.py:forward_train",
+      "type": "documents"
+    },
+    {
+      "source": "document:3D框和类别在模型中的作用.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD_head.py:VADHead",
+      "type": "documents"
+    },
+    {
+      "source": "document:3D框和类别在模型中的作用.md",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD_head.py:loss",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD数据使用说明.md",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD.py:forward_train",
+      "type": "documents"
+    },
+    {
+      "source": "document:数据处理与闭环系统.md",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD.py:forward_train",
+      "type": "documents"
+    },
+    {
+      "source": "document:数据处理与闭环系统.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD_head.py:VADHead",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD_论文总结_详细版.md",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD.py:VAD",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD_论文总结_详细版.md",
+      "target": "file:projects/mmdet3d_plugin/VAD/utils/plan_loss.py",
+      "type": "documents"
+    },
+    {
+      "source": "document:VAD_论文总结_详细版.md",
+      "target": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "type": "documents"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/VAD/VAD.py:VAD",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD.py:forward_train",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/VAD/VAD.py:VAD",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD.py:extract_img_feat",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/VAD/VAD.py:VAD",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD.py:extract_feat",
+      "type": "contains"
+    },
+    {
+      "source": "class:projects/mmdet3d_plugin/VAD/VAD_head.py:VADHead",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD_head.py:loss",
+      "type": "contains"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/VAD/VAD.py:extract_feat",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD.py:extract_img_feat",
+      "type": "calls"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/VAD/VAD.py:forward_train",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD.py:extract_feat",
+      "type": "calls"
+    },
+    {
+      "source": "function:projects/mmdet3d_plugin/VAD/VAD.py:forward_train",
+      "target": "function:projects/mmdet3d_plugin/VAD/VAD_head.py:loss",
+      "type": "calls"
+    },
+    {
+      "source": "class:VADv2/VADv2_head.py:v116ADTRHead",
+      "target": "class:projects/mmdet3d_plugin/VAD/VAD_head.py:VADHead",
+      "type": "inherits"
+    }
+  ],
+  "layers": [
+    {
+      "id": "layer:docs",
+      "name": "文档层",
+      "description": "所有项目说明、论文解读、学习计划、面试题库与数据/架构详解文档,不参与运行,仅用于理解项目与知识沉淀。",
+      "nodeIds": [
+        "document:README.md",
+        "document:learning_plan.md",
+        "document:面试准备总览.md",
+        "document:VAD_论文总结_详细版.md",
+        "document:代码阅读指南_论文对应.md",
+        "document:VAD模型架构详解.md",
+        "document:VAD面试题库_含答案.md",
+        "document:VAD面试题库_高级部分.md",
+        "document:VAD数据使用说明.md",
+        "document:3D标注流程详解.md",
+        "document:3D框和类别在模型中的作用.md",
+        "document:CAN总线与ego位姿详解.md",
+        "document:nuScenes地图格式详解.md",
+        "document:数据处理与特征提取指南.md",
+        "document:数据处理与闭环系统.md"
+      ]
+    },
+    {
+      "id": "layer:config",
+      "name": "配置层",
+      "description": "运行环境依赖与 mmdet3d 风格的模型/数据集/训练配置文件,定义 VAD v1/v2 各版本(base/tiny、stage 1/2、e2e、VADv2 CARLA)的模型结构、数据 pipeline、优化器与调度。",
+      "nodeIds": [
+        "config:requirements.txt",
+        "config:projects/configs/_base_/default_runtime.py",
+        "config:projects/configs/datasets/custom_nus-3d.py",
+        "config:projects/configs/_base_/datasets/nus-3d.py",
+        "config:projects/configs/_base_/datasets/nus-mono3d.py",
+        "config:projects/configs/_base_/datasets/kitti-3d-3class.py",
+        "config:projects/configs/VAD/VAD_base_e2e.py",
+        "config:projects/configs/VAD/VAD_base_stage_1.py",
+        "config:projects/configs/VAD/VAD_base_stage_2.py",
+        "config:projects/configs/VAD/VAD_tiny_e2e.py",
+        "config:projects/configs/VAD/VAD_tiny_stage_1.py",
+        "config:projects/configs/VAD/VAD_tiny_stage_2.py",
+        "config:VADv2/VADv2_config_voca4096.py"
+      ]
+    },
+    {
+      "id": "layer:data",
+      "name": "数据层",
+      "description": "数据集主类与地图矢量结构、数据加载/格式化/变换 pipeline、采样器与 DataLoader 构建器,以及地图 mAP、运动轨迹(ADE/FDE)与 nuScenes 检测评估等数据评估代码。",
+      "nodeIds": [
+        "file:projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py",
+        "file:projects/mmdet3d_plugin/datasets/vad_custom_nuscenes_eval.py",
+        "file:projects/mmdet3d_plugin/datasets/nuscenes_eval.py",
+        "file:projects/mmdet3d_plugin/datasets/pipelines/loading.py",
+        "file:projects/mmdet3d_plugin/datasets/pipelines/formating.py",
+        "file:projects/mmdet3d_plugin/datasets/pipelines/transform_3d.py",
+        "file:projects/mmdet3d_plugin/datasets/pipelines/__init__.py",
+        "file:projects/mmdet3d_plugin/datasets/__init__.py",
+        "file:projects/mmdet3d_plugin/datasets/builder.py",
+        "file:projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py",
+        "file:projects/mmdet3d_plugin/datasets/map_utils/tpfp.py",
+        "file:projects/mmdet3d_plugin/datasets/samplers/sampler.py",
+        "file:projects/mmdet3d_plugin/datasets/samplers/distributed_sampler.py",
+        "file:projects/mmdet3d_plugin/core/evaluation/metric_motion.py",
+        "file:projects/mmdet3d_plugin/core/evaluation/eval_hooks.py",
+        "file:projects/mmdet3d_plugin/core/evaluation/__init__.py"
+      ]
+    },
+    {
+      "id": "layer:model",
+      "name": "模型层",
+      "description": "BEVFormer 检测器/检测头/Transformer 模块、VADv2 检测头、3D 框分配器/解码器/匹配代价/框结构等 bbox 组件、VoVNet 主干、GridMask/位置编码等模型工具,以及规划约束损失,构成感知与端到端规划的核心网络组件。",
+      "nodeIds": [
+        "file:projects/mmdet3d_plugin/bevformer/__init__.py",
+        "file:projects/mmdet3d_plugin/bevformer/detectors/__init__.py",
+        "file:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py",
+        "file:projects/mmdet3d_plugin/bevformer/detectors/bevformer_fp16.py",
+        "file:projects/mmdet3d_plugin/bevformer/dense_heads/__init__.py",
+        "file:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py",
+        "file:projects/mmdet3d_plugin/bevformer/modules/__init__.py",
+        "file:projects/mmdet3d_plugin/bevformer/modules/transformer.py",
+        "file:projects/mmdet3d_plugin/bevformer/modules/encoder.py",
+        "file:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py",
+        "file:projects/mmdet3d_plugin/bevformer/modules/temporal_self_attention.py",
+        "file:projects/mmdet3d_plugin/bevformer/modules/decoder.py",
+        "file:projects/mmdet3d_plugin/bevformer/modules/custom_base_transformer_layer.py",
+        "file:projects/mmdet3d_plugin/bevformer/modules/multi_scale_deformable_attn_function.py",
+        "file:VADv2/VADv2_head.py",
+        "file:projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py",
+        "file:projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py",
+        "file:projects/mmdet3d_plugin/core/bbox/assigners/__init__.py",
+        "file:projects/mmdet3d_plugin/core/bbox/coders/nms_free_coder.py",
+        "file:projects/mmdet3d_plugin/core/bbox/coders/fut_nms_free_coder.py",
+        "file:projects/mmdet3d_plugin/core/bbox/coders/map_nms_free_coder.py",
+        "file:projects/mmdet3d_plugin/core/bbox/coders/__init__.py",
+        "file:projects/mmdet3d_plugin/core/bbox/match_costs/match_cost.py",
+        "file:projects/mmdet3d_plugin/core/bbox/util.py",
+        "file:projects/mmdet3d_plugin/core/bbox/structures/lidar_box3d.py",
+        "file:projects/mmdet3d_plugin/core/bbox/structures/nuscenes_box.py",
+        "file:projects/mmdet3d_plugin/models/backbones/__init__.py",
+        "file:projects/mmdet3d_plugin/models/backbones/vovnet.py",
+        "file:projects/mmdet3d_plugin/models/utils/__init__.py",
+        "file:projects/mmdet3d_plugin/models/utils/bricks.py",
+        "file:projects/mmdet3d_plugin/models/utils/embed.py",
+        "file:projects/mmdet3d_plugin/models/utils/grid_mask.py",
+        "file:projects/mmdet3d_plugin/models/utils/position_embedding.py",
+        "file:projects/mmdet3d_plugin/models/utils/visual.py",
+        "file:projects/mmdet3d_plugin/VAD/utils/plan_loss.py"
+      ]
+    },
+    {
+      "id": "layer:train_eval",
+      "name": "训练评估层",
+      "description": "训练/测试 API 与流程封装、面向视频序列的按 epoch Runner、权重同步与梯度检查钩子、自定义 AdamW2 优化器,以及多 GPU 分布式测试工具,驱动 VAD 的训练循环与推理评估。",
+      "nodeIds": [
+        "file:projects/mmdet3d_plugin/bevformer/apis/__init__.py",
+        "file:projects/mmdet3d_plugin/bevformer/apis/train.py",
+        "file:projects/mmdet3d_plugin/bevformer/apis/mmdet_train.py",
+        "file:projects/mmdet3d_plugin/bevformer/apis/test.py",
+        "file:projects/mmdet3d_plugin/bevformer/runner/__init__.py",
+        "file:projects/mmdet3d_plugin/bevformer/runner/epoch_based_runner.py",
+        "file:projects/mmdet3d_plugin/bevformer/hooks/__init__.py",
+        "file:projects/mmdet3d_plugin/bevformer/hooks/custom_hooks.py",
+        "file:projects/mmdet3d_plugin/models/hooks/__init__.py",
+        "file:projects/mmdet3d_plugin/models/hooks/hooks.py",
+        "file:projects/mmdet3d_plugin/models/opt/__init__.py",
+        "file:projects/mmdet3d_plugin/models/opt/adamw.py"
+      ]
+    }
+  ],
+  "tour": [
+    {
+      "order": 1,
+      "title": "项目概览:理解 VAD 是什么",
+      "description": "先建立全局认知。通过 README 了解向量化端到端自动驾驶范式、VAD-Tiny/Base 指标与开闭环结果;再用架构详解与论文总结建立从图像输入到规划输出的整体心智模型;最后用学习计划和阅读指南规划后续路线。学完你能讲清 VAD 的核心创新(向量化场景表示)和整体数据流。",
+      "nodeIds": [
+        "document:README.md",
+        "document:VAD模型架构详解.md",
+        "document:VAD_论文总结_详细版.md",
+        "document:代码阅读指南_论文对应.md",
+        "document:learning_plan.md"
+      ]
+    },
+    {
+      "order": 2,
+      "title": "数据格式与标注来源",
+      "description": "理解模型的输入与监督信号从哪来。VAD 是纯视觉方法,只用 6 相机图像;GT 3D 框来自 LiDAR 点云标注。掌握 3D 标注流程、3D 框/类别在模型中的四大作用、CAN 总线与 ego 位姿来源、nuScenes 地图格式三类元素。这是后续看数据处理代码的前置知识。",
+      "nodeIds": [
+        "document:VAD数据使用说明.md",
+        "document:3D标注流程详解.md",
+        "document:3D框和类别在模型中的作用.md",
+        "document:CAN总线与ego位姿详解.md",
+        "document:nuScenes地图格式详解.md"
+      ]
+    },
+    {
+      "order": 3,
+      "title": "数据处理与加载流程",
+      "description": "从原始 nuScenes 到模型张量。先读数据处理总览文档建立分步流程,再深入数据集主类(加载图像/3D标注/地图矢量/历史与未来轨迹/导航指令)、加载与格式化/变换 pipeline,以及 DataLoader 构建器与采样器。学完你能追踪一条样本如何被封装成 DataContainer 喂给模型。",
+      "nodeIds": [
+        "document:数据处理与特征提取指南.md",
+        "file:projects/mmdet3d_plugin/datasets/nuscenes_vad_dataset.py",
+        "file:projects/mmdet3d_plugin/datasets/pipelines/loading.py",
+        "file:projects/mmdet3d_plugin/datasets/pipelines/transform_3d.py",
+        "file:projects/mmdet3d_plugin/datasets/pipelines/formating.py",
+        "file:projects/mmdet3d_plugin/datasets/builder.py"
+      ]
+    },
+    {
+      "order": 4,
+      "title": "图像特征提取与 BEV 编码入口",
+      "description": "进入模型主干。从检测器入口看图像如何经 ResNet+FPN 提特征,再由 PerceptionTransformer 融合 can_bus/相机/层级嵌入生成 BEV 特征。这是连接感知输入与下游所有任务头的关键枢纽。",
+      "nodeIds": [
+        "file:projects/mmdet3d_plugin/bevformer/detectors/bevformer.py",
+        "file:projects/mmdet3d_plugin/models/backbones/vovnet.py",
+        "file:projects/mmdet3d_plugin/bevformer/modules/transformer.py"
+      ]
+    },
+    {
+      "order": 5,
+      "title": "BEV 编码器与时空注意力",
+      "description": "深入 BEV 特征生成的核心机制。编码器生成 3D/2D 参考点并做点采样投影;空间交叉注意力将 BEV 查询与多相机图像特征做 3D 可变形交叉注意力;时序自注意力在当前与历史 BEV 队列上做时序融合。理解这三者是吃透 BEVFormer 的关键。",
+      "nodeIds": [
+        "file:projects/mmdet3d_plugin/bevformer/modules/encoder.py",
+        "file:projects/mmdet3d_plugin/bevformer/modules/spatial_cross_attention.py",
+        "file:projects/mmdet3d_plugin/bevformer/modules/temporal_self_attention.py",
+        "file:projects/mmdet3d_plugin/bevformer/modules/multi_scale_deformable_attn_function.py"
+      ]
+    },
+    {
+      "order": 6,
+      "title": "解码器与检测头范式",
+      "description": "理解 DETR 范式下的查询解码与一对一匹配。解码器逐层迭代细化参考点;BEVFormerHead 生成 BEV 查询经 Transformer 输出 3D 框分类与回归;匈牙利分配器与 NMS-free 解码器完成预测与真值的一对一匹配和解码。这是 VADHead 多任务输出的结构基础。",
+      "nodeIds": [
+        "file:projects/mmdet3d_plugin/bevformer/modules/decoder.py",
+        "file:projects/mmdet3d_plugin/bevformer/dense_heads/bevformer_head.py",
+        "file:projects/mmdet3d_plugin/core/bbox/assigners/hungarian_assigner_3d.py",
+        "file:projects/mmdet3d_plugin/core/bbox/coders/nms_free_coder.py",
+        "file:projects/mmdet3d_plugin/core/bbox/util.py"
+      ]
+    },
+    {
+      "order": 7,
+      "title": "地图矢量化与运动预测",
+      "description": "理解 VAD 区别于栅格化方法的向量化地图与多模态运动预测。地图矢量元素用专门的匈牙利匹配(含 Chamfer 点序列代价)和 NMS-free 解码;运动预测输出带未来轨迹的检测框并用 ADE/FDE 评估。这是规划约束所依赖的中间表示。",
+      "nodeIds": [
+        "file:projects/mmdet3d_plugin/core/bbox/assigners/map_hungarian_assigner_3d.py",
+        "file:projects/mmdet3d_plugin/core/bbox/coders/map_nms_free_coder.py",
+        "file:projects/mmdet3d_plugin/core/bbox/coders/fut_nms_free_coder.py",
+        "file:projects/mmdet3d_plugin/core/evaluation/metric_motion.py"
+      ]
+    },
+    {
+      "order": 8,
+      "title": "规划约束与三大向量化损失",
+      "description": "抵达 VAD 的核心创新落地处。plan_loss 实现碰撞约束、边界越界约束、车道方向约束三大向量化规划损失。结合架构文档,理解 ego query 如何与 agent/map 交互并被这些约束监督,这是从感知到安全规划的闭环。",
+      "nodeIds": [
+        "file:projects/mmdet3d_plugin/VAD/utils/plan_loss.py",
+        "document:VAD面试题库_含答案.md",
+        "document:VAD面试题库_高级部分.md"
+      ]
+    },
+    {
+      "order": 9,
+      "title": "VADv2 改进:概率化规划",
+      "description": "对比 v1 与 v2 的演进。VADv2_head 在向量化表示上引入离散轨迹锚点(plan_anchors)的概率式端到端规划,整合交通灯/停车标志识别与多种规划评分损失;配置使用 4096 规划词表面向 CARLA 闭环。理解从确定性回归到概率化词表的范式转变。",
+      "nodeIds": [
+        "file:VADv2/VADv2_head.py",
+        "config:VADv2/VADv2_config_voca4096.py"
+      ]
+    },
+    {
+      "order": 10,
+      "title": "训练流程与配置体系",
+      "description": "打通训练落地。从 train.py 启动封装到 mmdet_train 构建数据加载器/优化器/视频 Runner;面向视频序列的 Runner 先无梯度推理历史帧再训练最后一帧。配置上理解 e2e 与两阶段训练(stage_1 冻结规划损失先训感知、stage_2 微调规划)的设计动机。",
+      "nodeIds": [
+        "file:projects/mmdet3d_plugin/bevformer/apis/train.py",
+        "file:projects/mmdet3d_plugin/bevformer/apis/mmdet_train.py",
+        "file:projects/mmdet3d_plugin/bevformer/runner/epoch_based_runner.py",
+        "config:projects/configs/VAD/VAD_base_e2e.py",
+        "config:projects/configs/VAD/VAD_base_stage_1.py",
+        "config:projects/configs/VAD/VAD_base_stage_2.py"
+      ]
+    },
+    {
+      "order": 11,
+      "title": "评估、可视化与闭环系统",
+      "description": "收尾全流程认知。掌握分布式测试与评估 Hook、VAD 自定义 nuScenes 检测评估与 PR/TP 曲线、地图 mAP 与 TP/FP 判定;再用闭环系统文档理解开环评测局限、实车数据流与数据闭环实践。学完你能完整解释一条样本从训练到评测的端到端链路。",
+      "nodeIds": [
+        "file:projects/mmdet3d_plugin/bevformer/apis/test.py",
+        "file:projects/mmdet3d_plugin/core/evaluation/eval_hooks.py",
+        "file:projects/mmdet3d_plugin/datasets/vad_custom_nuscenes_eval.py",
+        "file:projects/mmdet3d_plugin/datasets/map_utils/mean_ap.py",
+        "document:数据处理与闭环系统.md"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "issues": [],
+  "warnings": [
+    "Node 'file:projects/mmdet3d_plugin/datasets/nuscenes_eval.py' has no edges (orphan)",
+    "Node 'config:requirements.txt' has no edges (orphan)",
+    "Node 'config:projects/configs/_base_/datasets/nus-3d.py' has no edges (orphan)",
+    "Node 'config:projects/configs/_base_/datasets/nus-mono3d.py' has no edges (orphan)",
+    "Node 'config:projects/configs/_base_/datasets/kitti-3d-3class.py' has no edges (orphan)",
+    "Node 'config:VADv2/VADv2_config_voca4096.py' has no edges (orphan)",
+    "Node 'document:CAN总线与ego位姿详解.md' has no edges (orphan)",
+    "Node 'document:nuScenes地图格式详解.md' has no edges (orphan)",
+    "Node 'class:projects/mmdet3d_plugin/VAD/VAD_transformer.py:CustomTransformerDecoder' has no edges (orphan)"
+  ],
+  "stats": {
+    "totalNodes": 203,
+    "totalEdges": 266,
+    "totalLayers": 5,
+    "tourSteps": 11,
+    "nodeTypes": {
+      "file": 62,
+      "class": 56,
+      "function": 56,
+      "config": 13,
+      "document": 16
+    },
+    "edgeTypes": {
+      "imports": 72,
+      "contains": 109,
+      "calls": 40,
+      "inherits": 3,
+      "references": 9,
+      "documents": 33
+    }
+  }
+}
